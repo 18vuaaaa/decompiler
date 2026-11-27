@@ -2174,6 +2174,7 @@ local function synsaveinstance(CustomOptions, CustomOptions2)
 		AntiIdle = true,
 		Anonymous = false,
 		ReadMe = true,
+        WatermarkGui = true,
 		FilePath = false,
 		AvoidFileOverwrite = true,
 		Object = false,
@@ -2540,9 +2541,9 @@ local function synsaveinstance(CustomOptions, CustomOptions2)
 			placename = FilePath
 		elseif IsModel then
 			placename =
-				sanitizeFileName("model " .. PlaceName .. " " .. (ToSaveInstance or tmp[1] or game):GetFullName())
+				sanitizeFileName("ViciousVault - model " .. PlaceName .. " " .. (ToSaveInstance or tmp[1] or game):GetFullName())
 		else
-			placename = sanitizeFileName("place " .. PlaceName)
+			placename = sanitizeFileName("ViciousVault - place " .. PlaceName)
 		end
 
 		if OPTIONS.AvoidFileOverwrite and isfile then
@@ -3501,8 +3502,124 @@ local function synsaveinstance(CustomOptions, CustomOptions2)
 			or IsolatePlayers
 			or NilInstances and global_container.getnilinstances -- ! Make sure this accurately reflects everything below
 
+        if OPTIONS.WatermarkGui then
+         local DELETEME = Instance.new("ScreenGui")
+         local Background = Instance.new("Frame")
+         local BackgroundText = Instance.new("TextLabel")
+         local UIAspectRatioConstraint = Instance.new("UIAspectRatioConstraint")
+         local UITextSizeConstraint = Instance.new("UITextSizeConstraint")
+         local TextLabel = Instance.new("TextLabel")
+         local UIGradient = Instance.new("UIGradient")
+         local TextLabel_2 = Instance.new("TextLabel")
+         local TextLabel_3 = Instance.new("TextLabel")
+         local UIGradient_2 = Instance.new("UIGradient")
+         
+         --Properties:
+         
+         DELETEME.Name = "DELETE ME"
+         DELETEME.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
+         DELETEME.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+         DELETEME.DisplayOrder = 100000000
+         
+         Background.Name = "Background"
+         Background.Parent = DELETEME
+         Background.AnchorPoint = Vector2.new(0.5, 0.5)
+         Background.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+         Background.BackgroundTransparency = 0.150
+         Background.BorderColor3 = Color3.fromRGB(0, 0, 0)
+         Background.BorderSizePixel = 0
+         Background.Position = UDim2.new(0.5, 0, 0.5, 0)
+         Background.Size = UDim2.new(1, 0, 1, 0)
+         Background.ZIndex = 10000
+         
+         BackgroundText.Name = "BackgroundText"
+         BackgroundText.Parent = Background
+         BackgroundText.AnchorPoint = Vector2.new(0.5, 0.5)
+         BackgroundText.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+         BackgroundText.BackgroundTransparency = 1.000
+         BackgroundText.BorderColor3 = Color3.fromRGB(0, 0, 0)
+         BackgroundText.BorderSizePixel = 0
+         BackgroundText.Position = UDim2.new(0.5, 0, 0.5, 0)
+         BackgroundText.Size = UDim2.new(1.29999995, 0, 1.29999995, 0)
+         BackgroundText.Font = Enum.Font.Fondamento
+         BackgroundText.Text = "ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault "
+         BackgroundText.TextColor3 = Color3.fromRGB(255, 255, 255)
+         BackgroundText.TextScaled = true
+         BackgroundText.TextSize = 14.000
+         BackgroundText.TextTransparency = 0.780
+         BackgroundText.TextWrapped = true
+         
+         UIAspectRatioConstraint.Parent = BackgroundText
+         UIAspectRatioConstraint.AspectRatio = 2.172
+         
+         UITextSizeConstraint.Parent = BackgroundText
+         
+         TextLabel.Parent = Background
+         TextLabel.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+         TextLabel.BackgroundTransparency = 1.000
+         TextLabel.BorderColor3 = Color3.fromRGB(0, 0, 0)
+         TextLabel.BorderSizePixel = 0
+         TextLabel.Position = UDim2.new(0.120823897, 0, 0.515295148, 0)
+         TextLabel.Size = UDim2.new(0.757939637, 0, 0.397691697, 0)
+         TextLabel.Font = Enum.Font.GothamBlack
+         TextLabel.Text = "https://discord.gg/C3ekgzuxFy"
+         TextLabel.TextColor3 = Color3.fromRGB(255, 0, 0)
+         TextLabel.TextScaled = true
+         TextLabel.TextSize = 14.000
+         TextLabel.TextWrapped = true
+         
+         UIGradient.Color = ColorSequence.new{ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 255, 255)), ColorSequenceKeypoint.new(1.00, Color3.fromRGB(0, 0, 0))}
+         UIGradient.Rotation = 90
+         UIGradient.Parent = TextLabel
+         
+         TextLabel_2.Parent = Background
+         TextLabel_2.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+         TextLabel_2.BackgroundTransparency = 1.000
+         TextLabel_2.BorderColor3 = Color3.fromRGB(0, 0, 0)
+         TextLabel_2.BorderSizePixel = 0
+         TextLabel_2.Position = UDim2.new(0.162435502, 0, 0.340259612, 0)
+         TextLabel_2.Size = UDim2.new(0.694848061, 0, 0.298701286, 0)
+         TextLabel_2.Font = Enum.Font.GothamBlack
+         TextLabel_2.Text = "This was leaked by ViciousVault / JOIN OUR DISCORD FOR MORE FILES"
+         TextLabel_2.TextColor3 = Color3.fromRGB(170, 0, 255)
+         TextLabel_2.TextScaled = true
+         TextLabel_2.TextSize = 14.000
+         TextLabel_2.TextWrapped = true
+         
+         TextLabel_3.Parent = Background
+         TextLabel_3.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+         TextLabel_3.BackgroundTransparency = 1.000
+         TextLabel_3.BorderColor3 = Color3.fromRGB(0, 0, 0)
+         TextLabel_3.BorderSizePixel = 0
+         TextLabel_3.Position = UDim2.new(0.162435502, 0, 0.0857141763, 0)
+         TextLabel_3.Size = UDim2.new(0.694848061, 0, 0.298701286, 0)
+         TextLabel_3.Font = Enum.Font.GothamBlack
+         TextLabel_3.Text = "ViciousVault / VV"
+         TextLabel_3.TextColor3 = Color3.fromRGB(255, 255, 255)
+         TextLabel_3.TextScaled = true
+         TextLabel_3.TextSize = 14.000
+         TextLabel_3.TextWrapped = true
+         
+         UIGradient_2.Color = ColorSequence.new{ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 255, 255)), ColorSequenceKeypoint.new(1.00, Color3.fromRGB(0, 0, 0))}
+         UIGradient_2.Rotation = -90
+         UIGradient_2.Parent = TextLabel_3
+	end
+        local WatermarkGuiInstance
+		if OPTIONS.WatermarkGui then
+			local DELETEME = Instance.new("ScreenGui")
+			-- ... (your full GUI construction code, unchanged) ...
+			UIGradient_2.Rotation = -90
+			UIGradient_2.Parent = TextLabel_3
+
+			DELETEME.Parent = service.StarterGui
+			WatermarkGuiInstance = DELETEME
+		end
+
 		save_hierarchy(ToSaveList)
 
+		if WatermarkGuiInstance then
+			WatermarkGuiInstance:Destroy()
+		end
 		if IsolateLocalPlayer or IsolateLocalPlayerCharacter then
 			local LocalPlayer = service.Players.LocalPlayer
 			if LocalPlayer then
@@ -3517,6 +3634,12 @@ local function synsaveinstance(CustomOptions, CustomOptions2)
 					end
 				end
 			end
+		end
+
+        if OPTIONS.WatermarkGui then
+			pcall(function()
+				DELETEME:Destroy()
+			end)
 		end
 
 		if IsolateStarterPlayer then
