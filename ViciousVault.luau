@@ -1,4128 +1,564 @@
---!native
---!optimize 2
---!divine-intellect
--- https://discord.com/invite/C3ekgzuxFy
-
-local konstantdecompiler = loadstring(game:HttpGet('https://raw.githubusercontent.com/verysigmapro/UniversalSynSaveInstance-With-Save-Terrain/refs/heads/main/konstantdecompiler.lua'))()
-
-local game = game
-local pcall = pcall
-local workspace = workspace
-local setmetatable = setmetatable
-local bit32 = bit32
-local buffer = buffer
-local Instance = Instance
-local assert = assert
-local table = table
-local string = string
-
-local function string_find(s, pattern)
-	return string.find(s, pattern, nil, true)
-end
-
-local function ArrayToDict(t, hydridMode, valueOverride, typeStrict)
-	local tmp = {}
-
-	if hydridMode then
-		for any1, any2 in t do
-			if type(any1) == "number" then
-				tmp[any2] = valueOverride or true
-			elseif type(any2) == "table" then
-				tmp[any1] = ArrayToDict(any2, hydridMode) -- any1 is Class, any2 is Name
-			else
-				tmp[any1] = any2
-			end
-		end
-	else
-		for _, key in t do
-			if not typeStrict or typeStrict and type(key) == typeStrict then
-				tmp[key] = true
-			end
-		end
-	end
-
-	return tmp
-end
-
-local global_container
-do
-	local filename = "UniversalMethodFinder"
-
-	local finder
-	finder, global_container = loadstring(
-		game:HttpGet("https://raw.githubusercontent.com/rbxlx/SomeHub/refs/heads/main/" .. filename .. ".luau", true),
-		filename
-	)()
-
-	finder({
-		-- readbinarystring = 'string.find(...,"bin",nil,true)', -- ! Could match some unwanted stuff (getbinaryindex)
-		-- request = 'string.find(...,"request",nil,true) and not string.find(...,"internal",nil,true)',
-		base64encode = 'local a={...}local b=a[1]local function c(a,b)return string.find(a,b,nil,true)end;return c(b,"encode")and(c(b,"base64")or c(string.lower(tostring(a[2])),"base64"))',
-		-- cloneref = 'string.find(...,"clone",nil,true) and string.find(...,"ref",nil,true)',
-		-- decompile = '(string.find(...,"decomp",nil,true) and string.sub(...,#...) ~= "s")',
-		gethiddenproperty = 'string.find(...,"get",nil,true) and string.find(...,"h",nil,true) and string.find(...,"prop",nil,true) and string.sub(...,#...) ~= "s"',
-		gethui = 'string.find(...,"get",nil,true) and string.find(...,"h",nil,true) and string.find(...,"ui",nil,true)',
-		-- getcon = 'string.find(...,"get",nil,true) and (string.find(...,"conn",nil,true) or string.find(...,"sig",nil,true)) and string.sub(...,#(...))=="s"',
-		getnilinstances = 'string.find(...,"nil",nil,true) and string.find(...,"get",nil,true) and string.sub(...,#...) == "s"', -- ! Could match some unwanted stuff
-		getscriptbytecode = 'string.find(...,"get",nil,true) and string.find(...,"bytecode",nil,true)', --  or string.find(...,"dump",nil,true) and string.find(...,"string",nil,true) due to Fluxus (dumpstring returns a function)
-		-- hash = 'local a={...}local b=a[1]local function c(a,b)return string.find(a,b,nil,true)end;return c(b,"hash")and c(string.lower(tostring(a[2])),"crypt")',
-		protectgui = 'string.find(...,"protect",nil,true) and string.find(...,"ui",nil,true) and not string.find(...,"un",nil,true)',
-		setthreadidentity = 'string.find(...,"identity",nil,true) and string.find(...,"set",nil,true)',
-	}, true, 10)
-end
-
-local identify_executor = identifyexecutor or getexecutorname or whatexecutor
-
-local EXECUTOR_NAME = identify_executor and identify_executor() or ""
-
--- local cloneref = global_container.cloneref
-local gethiddenproperty = global_container.gethiddenproperty
-
--- These should be universal enough
-local appendfile = appendfile
-local isfile = isfile
-local readfile = readfile
-local writefile = writefile
-
-local getscriptbytecode = global_container.getscriptbytecode -- * A lot of assumptions are made based on whether this function is defined or not. So in certain edge cases, like if the executor defines "decompile" or "getscripthash" function yet doesn't define this function there might be loss of functionality of the saveinstance. Although that would be very rare and weird
-local base64encode = global_container.base64encode
-
-local service = setmetatable({}, {
-	__index = function(self, serviceName)
-		local o, s = pcall(Instance.new, serviceName)
-		local Service = o and s
-			or game:GetService(serviceName)
-			or settings():GetService(serviceName)
-			or UserSettings():GetService(serviceName)
-
-		-- if cloneref then
-		-- 	Service = cloneref(Service)
-		-- end
-		if Service then
-			self[serviceName] = Service
-		end
-		return Service
-	end,
-})
-
-local gethiddenproperty_fallback
-do -- * Load Region of Déjà Vu
-	local UGCValidationService -- = service.UGCValidationService
-
-	gethiddenproperty_fallback = function(instance, propertyName)
-		if not UGCValidationService then
-			UGCValidationService = service.UGCValidationService
-		end
-		return UGCValidationService:GetPropertyValue(instance, propertyName) -- TODO Sadly there's no way to tell whether value is actually nil or the function just couldn't read it (always returns nil for "Class" category properties)
-		-- TODO `category ~= "Class"` causes WeldConstraint Part1Internal to be read as nil and not get unfiltered. Currently, there are no properties of category "Class" that match the following: NotScriptable, can be read with gethiddenproperty_fallback accurately (it always outputs nil for "Class" category, making that check useless anyway) & don't have a NotScriptableFix.
-	end
-	if gethiddenproperty then
-		local o, r = pcall(gethiddenproperty, workspace, "StreamOutBehavior")
-		if not o or r ~= nil and typeof(r) ~= "EnumItem" then -- * Tests if gethiddenproperty is broken
-			gethiddenproperty = nil
-		else
-			o, r = pcall(gethiddenproperty, Instance.new("AnimationRigData", Instance.new("Folder")), "parent") -- * Tests how it reacts to property overlap (shadowing) due to AnimationRigData.parent; expected BinaryString
-
-			if o and r ~= nil and type(r) ~= "string" then
-				gethiddenproperty = nil
-			end
-		end
-	end
-	local function benchmark(funcs, ...)
-		local ranking = table.create(2)
-		for i, f in funcs do
-			local start = os.clock()
-			for _ = 1, 50 do
-				f(...)
-			end
-			ranking[i] = { t = os.clock() - start, f = f }
-		end
-		table.sort(ranking, function(a, b)
-			return a.t < b.t
-		end)
-		return ranking[1].f
-	end
-
-	local test_str = string.rep("\1\0\0\0\1\2\3\4\5\6\7", 50)
-
-	do
-		if not bit32.byteswap or not pcall(bit32.byteswap, 1) then -- Because Fluxus is missing byteswap
-			bit32 = table.clone(bit32)
-
-			local function tobit(num)
-				num %= (bit32.bxor(num, 32))
-				if 0x80000000 < num then
-					num -= bit32.bxor(num, 32)
-				end
-				return num
-			end
-
-			bit32.byteswap = function(num)
-				local BYTE_SIZE = 8
-				local MAX_BYTE_VALUE = 255
-
-				num %= bit32.bxor(2, 32)
-
-				local a = bit32.band(num, MAX_BYTE_VALUE)
-				num = bit32.rshift(num, BYTE_SIZE)
-
-				local b = bit32.band(num, MAX_BYTE_VALUE)
-				num = bit32.rshift(num, BYTE_SIZE)
-
-				local c = bit32.band(num, MAX_BYTE_VALUE)
-				num = bit32.rshift(num, BYTE_SIZE)
-
-				local d = bit32.band(num, MAX_BYTE_VALUE)
-				num = tobit(bit32.lshift(bit32.lshift(bit32.lshift(a, BYTE_SIZE) + b, BYTE_SIZE) + c, BYTE_SIZE) + d)
-				return num
-			end
-
-			table.freeze(bit32)
-		end
-
-		-- Credits @daily3014 & @XoifaiI
-		local rbxcrypt_base64encode
-		pcall(function()
-			local b64_enc_buf = loadstring(
-				game:HttpGet(
-					"https://raw.githubusercontent.com/verysigmapro/UniversalSynSaveInstance-With-Save-Terrain/refs/heads/main/daily3014_Base64.luau",
-					true
-				),
-				"Base64"
-			)().Encode
-			rbxcrypt_base64encode = function(raw)
-				return buffer.tostring(b64_enc_buf(buffer.fromstring(raw)))
-			end
-		end)
-
-		local EncodingService = game:GetService("EncodingService")
-		local EncodingService_base64encode = function(raw)
-			return buffer.tostring(EncodingService:Base64Encode(buffer.fromstring(raw)))
-		end
-
-		-- * Tests if base64encode exists and works properly then benchmark it
-		if base64encode and base64encode("\1\0\0\0\1") == "AQAAAAE=" then
-			if rbxcrypt_base64encode then
-				base64encode =
-					benchmark({ base64encode, rbxcrypt_base64encode, EncodingService_base64encode }, test_str)
-			end
-		else
-			base64encode = rbxcrypt_base64encode
-		end
-
-		assert(base64encode, "base64encode not found")
-	end
-end
-
-local SharedStrings = {}
-local SharedString_identifiers = setmetatable({
-	identifier = 1e15, -- 1 quadrillion, up to 9.(9) quadrillion, in theory this shouldn't ever run out and be enough for all sharedstrings ever imaginable
-	-- TODO: worst case, add fallback to str randomizer once numbers run out : )
-}, {
-	__index = function(self, str)
-		local Identifier = base64encode(tostring(self.identifier)) -- tostring is only needed for built-in base64encode, Luau base64 implementations don't need it as buffers autoconvert
-		self.identifier += 1
-
-		self[str] = Identifier -- ? The value of the md5 attribute is a Base64-encoded key. <SharedString> type elements use this key to refer to the value of the string. The value is the text content, which is Base64-encoded. Historically, the key was the MD5 hash of the string value. However, this is not required; the key can be any value that will uniquely identify the shared string. Roblox currently uses BLAKE2b truncated to 16 bytes..
-		return Identifier
-	end,
-})
-
-local inherited_properties = {}
-local default_instances = {}
-local referents, ref_size = {}, 0 -- ? Roblox encodes all <Item> elements with a referent attribute. Each value is generated by starting with the prefix RBX, followed by a UUID version 4, with - characters removed, and all characters converted to uppercase.
-
-local function GetRef(instance)
-	local ref = referents[instance]
-	if not ref then
-		ref = ref_size
-		referents[instance] = ref
-		ref_size += 1
-	end
-	return ref
-end
-
-local function index(self, index_name)
-	return self[index_name]
-end
-
-local version = version
-if not version then
-	version = function()
-		return "UNKNOWN"
-	end
-end
-
-local CLIENT_VERSION = tonumber(string.split(version(), ".")[2]) or 9e9 -- Velocity temp fix
-
-local attr_Type_IDs = {
-	string = 0x02,
-	boolean = 0x03,
-	int32 = 0x04,
-	-- float = 0x05, -- float32
-	number = 0x06, -- float64 (double)
-	-- Array = 0x07,
-	-- Dictionary = 0x08,
-	UDim = 0x09,
-	UDim2 = 0x0A,
-	Ray = 0x0B,
-	Faces = 0x0C,
-	Axes = 0x0D,
-	BrickColor = 0x0E,
-	Color3 = 0x0F,
-	Vector2 = 0x10,
-	Vector3 = 0x11,
-	Vector2int16 = 0x12,
-	Vector3int16 = 0x13,
-	CFrame = 0x14,
-	EnumItem = 0x15,
-	NumberSequence = 0x17,
-	NumberSequenceKeypoint = 0x18,
-	ColorSequence = 0x19,
-	ColorSequenceKeypoint = 0x1A,
-	NumberRange = 0x1B,
-	Rect = 0x1C,
-	PhysicalProperties = 0x1D,
-	Region3 = 0x1F,
-	Region3int16 = 0x20,
-	Font = 0x21,
-	SecurityCapabilities = 0x22,
-	Path2DControlPoint = 0x23,
-}
-local CFrame_Rotation_IDs = {
-	["\0\0\128\63\0\0\0\0\0\0\0\0\0\0\0\0\0\0\128\63\0\0\0\0\0\0\0\0\0\0\0\0\0\0\128\63"] = 0x02,
-	["\0\0\128\63\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\128\191\0\0\0\0\0\0\128\63\0\0\0\0"] = 0x03,
-	["\0\0\128\63\0\0\0\0\0\0\0\0\0\0\0\0\0\0\128\191\0\0\0\0\0\0\0\0\0\0\0\0\0\0\128\191"] = 0x05,
-	["\0\0\128\63\0\0\0\0\0\0\0\128\0\0\0\0\0\0\0\0\0\0\128\63\0\0\0\0\0\0\128\191\0\0\0\0"] = 0x06,
-	["\0\0\0\0\0\0\128\63\0\0\0\0\0\0\128\63\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\128\191"] = 0x07,
-	["\0\0\0\0\0\0\0\0\0\0\128\63\0\0\128\63\0\0\0\0\0\0\0\0\0\0\0\0\0\0\128\63\0\0\0\0"] = 0x09,
-	["\0\0\0\0\0\0\128\191\0\0\0\0\0\0\128\63\0\0\0\0\0\0\0\128\0\0\0\0\0\0\0\0\0\0\128\63"] = 0x0a,
-	["\0\0\0\0\0\0\0\0\0\0\128\191\0\0\128\63\0\0\0\0\0\0\0\0\0\0\0\0\0\0\128\191\0\0\0\0"] = 0x0c,
-	["\0\0\0\0\0\0\128\63\0\0\0\0\0\0\0\0\0\0\0\0\0\0\128\63\0\0\128\63\0\0\0\0\0\0\0\0"] = 0x0d,
-	["\0\0\0\0\0\0\0\0\0\0\128\191\0\0\0\0\0\0\128\63\0\0\0\0\0\0\128\63\0\0\0\0\0\0\0\0"] = 0x0e,
-	["\0\0\0\0\0\0\128\191\0\0\0\0\0\0\0\0\0\0\0\0\0\0\128\191\0\0\128\63\0\0\0\0\0\0\0\0"] = 0x10,
-	["\0\0\0\0\0\0\0\0\0\0\128\63\0\0\0\0\0\0\128\191\0\0\0\0\0\0\128\63\0\0\0\0\0\0\0\128"] = 0x11,
-	["\0\0\128\191\0\0\0\0\0\0\0\0\0\0\0\0\0\0\128\63\0\0\0\0\0\0\0\0\0\0\0\0\0\0\128\191"] = 0x14,
-	["\0\0\128\191\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\128\63\0\0\0\0\0\0\128\63\0\0\0\128"] = 0x15,
-	["\0\0\128\191\0\0\0\0\0\0\0\0\0\0\0\0\0\0\128\191\0\0\0\0\0\0\0\0\0\0\0\0\0\0\128\63"] = 0x17,
-	["\0\0\128\191\0\0\0\0\0\0\0\128\0\0\0\0\0\0\0\0\0\0\128\191\0\0\0\0\0\0\128\191\0\0\0\128"] = 0x18,
-	["\0\0\0\0\0\0\128\63\0\0\0\128\0\0\128\191\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\128\63"] = 0x19,
-	["\0\0\0\0\0\0\0\0\0\0\128\191\0\0\128\191\0\0\0\0\0\0\0\0\0\0\0\0\0\0\128\63\0\0\0\0"] = 0x1b,
-	["\0\0\0\0\0\0\128\191\0\0\0\128\0\0\128\191\0\0\0\0\0\0\0\128\0\0\0\0\0\0\0\0\0\0\128\191"] = 0x1c,
-	["\0\0\0\0\0\0\0\0\0\0\128\63\0\0\128\191\0\0\0\0\0\0\0\0\0\0\0\0\0\0\128\191\0\0\0\0"] = 0x1e,
-	["\0\0\0\0\0\0\128\63\0\0\0\0\0\0\0\0\0\0\0\0\0\0\128\191\0\0\128\191\0\0\0\0\0\0\0\0"] = 0x1f,
-	["\0\0\0\0\0\0\0\0\0\0\128\63\0\0\0\0\0\0\128\63\0\0\0\128\0\0\128\191\0\0\0\0\0\0\0\0"] = 0x20,
-	["\0\0\0\0\0\0\128\191\0\0\0\0\0\0\0\0\0\0\0\0\0\0\128\63\0\0\128\191\0\0\0\0\0\0\0\0"] = 0x22,
-	["\0\0\0\0\0\0\0\0\0\0\128\191\0\0\0\0\0\0\128\191\0\0\0\128\0\0\128\191\0\0\0\0\0\0\0\128"] = 0x23,
-}
-local BASE_CAPABILITIES
-pcall(function()
-	BASE_CAPABILITIES = SecurityCapabilities.new()
-end)
-local CAPABILITY_BITS = {
-	Plugin = 2 ^ 0, ----------------  0
-	LocalUser = 2 ^ 1, -------------  1
-	WritePlayer = 2 ^ 2, -----------  2
-	RobloxScript = 2 ^ 3, ----------  3
-	RobloxEngine = 2 ^ 4, ----------  4
-	NotAccessible = 2 ^ 5, ---------  5
-	RunClientScript = 2 ^ 8, -------  8
-	RunServerScript = 2 ^ 9, -------  9
-	Unknown = 2 ^ 10, --------------  10 (0xa)
-	AccessOutsideWrite = 2 ^ 11, ---  11 (0xb)
-	Unassigned = 2 ^ 15, -----------  15 (0xf)
-	AssetRequire = 2 ^ 16, ---------  16 (0x10)
-	LoadString = 2 ^ 17, -----------  17 (0x11)
-	ScriptGlobals = 2 ^ 18, --------  18 (0x12)
-	CreateInstances = 2 ^ 19, ------  19 (0x13)
-	Basic = 2 ^ 20, ----------------  20 (0x14)
-	Audio = 2 ^ 21, ----------------  21 (0x15)
-	DataStore = 2 ^ 22, ------------  22 (0x16)
-	Network = 2 ^ 23, --------------  23 (0x17)
-	Physics = 2 ^ 24, --------------  24 (0x18)
-	UI = 2 ^ 25, -------------------  25 (0x19)
-	CSG = 2 ^ 26, ------------------  26 (0x1a)
-	Chat = 2 ^ 27, -----------------  27 (0x1b)
-	Animation = 2 ^ 28, ------------  28 (0x1c)
-	Avatar = 2 ^ 29, ---------------  29 (0x1d)
-	Input = 2 ^ 30, ----------------  30 (0x1e)
-	Environment = 2 ^ 31, ----------  31 (0x1f)
-	RemoteEvent = 2 ^ 32, ----------  32 (0x20)
-	LegacySound = 2 ^ 33, ----------  33 (0x21)
-	Players = 2 ^ 34, --------------  34 (0x22)
-	CapabilityControl = 2 ^ 35, ----  35 (0x23)
-	RemoteCommand = 2 ^ 59, --------  59 (0x3b)
-	InternalTest = 2 ^ 60, ---------  60 (0x3c), Related to TestingGameScript
-	PluginOrOpenCloud = 2 ^ 61, ----  61 (0x3d)
-	Assistant = 2 ^ 62, ------------  62 (0x3e)
-	-- Restricted = 2 ^ 63, --------  for negative (highest bit for i64)
-}
-
-local function __COUNT_CAPABILITY_BITS(raw)
-	-- TODO tostring & string.split aren't ideal but this is the only way until the feature is out of the experimental phase (SecurityCapabilities.Contains exists but the Enums that it accepts lacks some hidden bits) - NotAccessible, Unknown, Restricted
-	-- ! Seems like both tostring & .Contains ignore high / internal bits (anything above CapabilityControl): RemoteCommand, InternalTest, PluginOrOpenCloud, Assistant. They're present when created & saved by Studio but can't be read through current means
-
-	local result = 0
-	for _, flag in string.split(tostring(raw), " | ") do
-		local bit = CAPABILITY_BITS[flag]
-		if bit then
-			result += bit
-		end
-	end
-	return result
-end
-
-local function __COUNT_BITS(...) -- * Credits to Friend (you know yourself)
-	local Value = 0
-
-	for i, bit in { ... } do
-		if bit then
-			Value += 2 ^ (i - 1)
-		end
-	end
-
-	return Value
-end
-
-local Binary_Descriptors
-Binary_Descriptors = {
-	__PACK_MULTIPLE = function(descriptor, value1, value2, value3)
-		local buf1, size1 = descriptor(value1)
-		local buf2, size2 = descriptor(value2)
-
-		local len = size1 + size2
-		local buf3, size3
-
-		if value3 ~= nil then
-			buf3, size3 = descriptor(value3)
-			len += size3
-		end
-
-		local b = buffer.create(len)
-
-		buffer.copy(b, 0, buf1)
-		buffer.copy(b, size1, buf2)
-
-		if value3 ~= nil then
-			buffer.copy(b, size1 + size2, buf3)
-		end
-
-		return b, len
-	end,
-	__construct_Sequence = function(keypoint_handler, keypointSize)
-		return function(raw)
-			local Keypoints = raw.Keypoints
-			local Keypoints_n = #Keypoints
-
-			local len = 4 + keypointSize * Keypoints_n
-			local b = buffer.create(len)
-
-			buffer.writeu32(b, 0, Keypoints_n)
-
-			local offset = 4
-			for _, keypoint in Keypoints do
-				keypoint_handler(keypoint, b, offset)
-				offset += keypointSize
-			end
-
-			return b, len
-		end
-	end,
-	__writei64 = function(b, offset, raw)
-		local low = bit32.band(raw, 0xFFFFFFFF)
-		local high = (raw - low) / 0x100000000
-
-		buffer.writei32(b, offset, low)
-		buffer.writei32(b, offset + 4, high)
-	end,
-	__PACK_F32 = nil,
-	__PACK_I16 = nil,
-	__construct__PACKER = function(float)
-		local writeFunc = float and buffer.writef32 or buffer.writei16
-		local elementSize = float and 4 or 2
-
-		-- local zbuf, nozbuf = buffer.create(elementSize * 3), buffer.create(elementSize * 2)
-
-		return function(X, Y, Z)
-			local len = Z and (elementSize * 3) or (elementSize * 2)
-			local b = buffer.create(len)
-
-			writeFunc(b, 0, X)
-			writeFunc(b, elementSize, Y)
-			if Z then
-				writeFunc(b, elementSize * 2, Z)
-			end
-
-			return b, len
-		end
-	end,
-	--------------------------------------------------------------
-	--------------------------------------------------------------
-	--------------------------------------------------------------
-	["string"] = function(raw)
-		local raw_len = #raw
-		local len = 4 + raw_len
-
-		local b = buffer.create(len)
-
-		buffer.writeu32(b, 0, raw_len)
-		buffer.writestring(b, 4, raw)
-
-		return b, len
-	end,
-	["boolean"] = function(raw)
-		local b = buffer.create(1)
-
-		buffer.writeu8(b, 0, raw and 1 or 0)
-
-		return b, 1
-	end,
-	["number"] = function(raw) -- double
-		local b = buffer.create(8)
-
-		buffer.writef64(b, 0, raw)
-
-		return b, 8
-	end,
-	["UDim"] = function(raw)
-		local b = buffer.create(8)
-
-		buffer.writef32(b, 0, raw.Scale)
-		buffer.writei32(b, 4, raw.Offset)
-
-		return b, 8
-	end,
-	["UDim2"] = function(raw)
-		return Binary_Descriptors.__PACK_MULTIPLE(Binary_Descriptors["UDim"], raw.X, raw.Y)
-	end,
-	["Ray"] = function(raw)
-		return Binary_Descriptors.__PACK_MULTIPLE(Binary_Descriptors["Vector3"], raw.Origin, raw.Direction)
-	end,
-	["Faces"] = function(raw)
-		local b = buffer.create(4)
-
-		buffer.writeu32(b, 0, __COUNT_BITS(raw.Right, raw.Top, raw.Back, raw.Left, raw.Bottom, raw.Front))
-
-		return b, 4
-	end,
-	["Axes"] = function(raw)
-		local b = buffer.create(4)
-
-		buffer.writeu32(b, 0, __COUNT_BITS(raw.X, raw.Y, raw.Z))
-
-		return b, 4
-	end,
-	["BrickColor"] = function(raw)
-		local b = buffer.create(4)
-
-		buffer.writeu32(b, 0, raw.Number)
-
-		return b, 4
-	end,
-	["Color3"] = function(raw)
-		return Binary_Descriptors.__PACK_F32(raw.R, raw.G, raw.B)
-	end,
-	["Vector2"] = function(raw)
-		return Binary_Descriptors.__PACK_F32(raw.X, raw.Y)
-	end,
-	["Vector3"] = function(raw)
-		return Binary_Descriptors.__PACK_F32(raw.X, raw.Y, raw.Z)
-	end,
-	["Vector2int16"] = function(raw)
-		return Binary_Descriptors.__PACK_I16(raw.X, raw.Y)
-	end,
-	["Vector3int16"] = function(raw)
-		return Binary_Descriptors.__PACK_I16(raw.X, raw.Y, raw.Z)
-	end,
-	["CFrame"] = function(raw)
-		local X, Y, Z, R00, R01, R02, R10, R11, R12, R20, R21, R22 = raw:GetComponents()
-		local rotation_ID
-		do
-			local b = buffer.create(36)
-
-			buffer.writef32(b, 0, R00)
-			buffer.writef32(b, 4, R01)
-			buffer.writef32(b, 8, R02)
-			buffer.writef32(b, 12, R10)
-			buffer.writef32(b, 16, R11)
-			buffer.writef32(b, 20, R12)
-			buffer.writef32(b, 24, R20)
-			buffer.writef32(b, 28, R21)
-			buffer.writef32(b, 32, R22)
-
-			rotation_ID = CFrame_Rotation_IDs[buffer.tostring(b)]
-		end
-
-		local len = rotation_ID and 13 or 49
-		local b = buffer.create(len)
-
-		local __PACK_F32 = Binary_Descriptors.__PACK_F32
-		local position = __PACK_F32(X, Y, Z)
-		buffer.copy(b, 0, position)
-		-- buffer.writef32(b, 0, X)
-		-- buffer.writef32(b, 4, Y)
-		-- buffer.writef32(b, 8, Z)
-
-		if rotation_ID then
-			buffer.writeu8(b, 12, rotation_ID)
-		else
-			buffer.writeu8(b, 12, 0x0)
-
-			local xBasis = __PACK_F32(R00, R01, R02)
-			buffer.copy(b, 13, xBasis)
-			local yBasis = __PACK_F32(R10, R11, R12)
-			buffer.copy(b, 13 + 12, yBasis)
-			local zBasis = __PACK_F32(R20, R21, R22)
-			buffer.copy(b, 13 + 24, zBasis)
-
-			-- buffer.writef32(b, 13, R00)
-			-- buffer.writef32(b, 17, R01)
-			-- buffer.writef32(b, 21, R02)
-
-			-- buffer.writef32(b, 25, R10)
-			-- buffer.writef32(b, 29, R11)
-			-- buffer.writef32(b, 33, R12)
-
-			-- buffer.writef32(b, 37, R20)
-			-- buffer.writef32(b, 41, R21)
-			-- buffer.writef32(b, 45, R22)
-		end
-
-		return b, len
-	end,
-	["EnumItem"] = function(raw)
-		local b_Name, Name_size = Binary_Descriptors["string"](tostring(raw.EnumType))
-
-		local len = Name_size + 4
-		local b = buffer.create(len)
-
-		buffer.copy(b, 0, b_Name)
-		buffer.writeu32(b, Name_size, raw.Value)
-
-		return b, len
-	end,
-	["NumberSequence"] = nil,
-	["NumberSequenceKeypoint"] = function(keypoint, b, offset)
-		if not b then
-			return Binary_Descriptors.__PACK_F32(keypoint.Envelope, keypoint.Time, keypoint.Value)
-		end
-
-		buffer.writef32(b, offset, keypoint.Envelope)
-		offset += 4
-		buffer.writef32(b, offset, keypoint.Time)
-		offset += 4
-		buffer.writef32(b, offset, keypoint.Value)
-	end,
-	["ColorSequence"] = nil,
-	["ColorSequenceKeypoint"] = function(keypoint, b, offset)
-		local Value = Binary_Descriptors["Color3"](keypoint.Value)
-
-		if not b then
-			b = buffer.create(20)
-			offset = 0
-		end
-
-		buffer.writef32(b, offset, 0)
-		offset += 4
-		buffer.writef32(b, offset, keypoint.Time)
-		offset += 4
-		buffer.copy(b, offset, Value)
-
-		return b, 20
-	end,
-	["NumberRange"] = function(raw)
-		return Binary_Descriptors.__PACK_F32(raw.Min, raw.Max)
-	end,
-	["Rect"] = function(raw)
-		return Binary_Descriptors.__PACK_MULTIPLE(Binary_Descriptors["Vector2"], raw.Min, raw.Max)
-	end,
-	["PhysicalProperties"] = function(raw) -- ? Not sure yet (https://github.com/RobloxAPI/spec/blob/master/properties/drafts/AttributesSerializeFull.md#physicalproperties)
-		local len = 1
-		if raw then
-			len += 24
-		end
-		local b = buffer.create(len)
-
-		buffer.writeu8(b, 0, raw and 3 or 0) -- 3 means it has set CustomPhysicalProperties & has set AcousticAbsorption
-
-		if raw then
-			buffer.writef32(b, 1, raw.Density)
-			buffer.writef32(b, 5, raw.Friction)
-			buffer.writef32(b, 9, raw.Elasticity)
-			buffer.writef32(b, 13, raw.FrictionWeight)
-			buffer.writef32(b, 17, raw.ElasticityWeight)
-			buffer.writef32(b, 21, raw.AcousticAbsorption)
-		end
-
-		return b, len
-	end,
-	["Region3"] = function(raw)
-		local Translation = raw.CFrame.Position
-		local HalfSize = raw.Size * 0.5
-
-		return Binary_Descriptors.__PACK_MULTIPLE(
-			Binary_Descriptors["Vector3"],
-			Translation - HalfSize, -- /App/util/Region3.cpp#L38
-			Translation + HalfSize -- /App/util/Region3.cpp#L42
-		)
-	end,
-	["Region3int16"] = function(raw)
-		return Binary_Descriptors.__PACK_MULTIPLE(Binary_Descriptors["Vector3int16"], raw.Min, raw.Max)
-	end,
-	["Font"] = 636 < CLIENT_VERSION and function(raw)
-		local string__descriptor = Binary_Descriptors["string"]
-
-		local b_Family, Family_size = string__descriptor(raw.Family)
-		local b_CachedFaceId, CachedFaceId_size = string__descriptor("")
-
-		local len = 3 + Family_size + CachedFaceId_size
-		local b = buffer.create(len)
-
-		local ok_w, weight = pcall(index, raw, "Weight")
-		local ok_s, style = pcall(index, raw, "Style")
-
-		buffer.writeu16(b, 0, ok_w and weight.Value or 0)
-		buffer.writeu8(b, 2, ok_s and style.Value or 0)
-
-		buffer.copy(b, 3, b_Family)
-		buffer.copy(b, 3 + Family_size, b_CachedFaceId)
-
-		return b, len
-	end or function(raw)
-		local string__descriptor = Binary_Descriptors["string"]
-
-		local b_Family, Family_size = string__descriptor(raw.Family)
-		local b_CachedFaceId, CachedFaceId_size = string__descriptor("")
-
-		local len = 3 + Family_size + CachedFaceId_size
-		local b = buffer.create(len)
-
-		local FontString = tostring(raw)
-
-		local EmptyWeight = string_find(FontString, "Weight = ,")
-		local EmptyStyle = string_find(FontString, "Style =  }")
-
-		buffer.writeu16(b, 0, EmptyWeight and 0 or raw.Weight.Value)
-		buffer.writeu8(b, 2, EmptyStyle and 0 or raw.Style.Value)
-
-		buffer.copy(b, 3, b_Family)
-		buffer.copy(b, 3 + Family_size, b_CachedFaceId)
-
-		return b, len
-	end,
-	["SecurityCapabilities"] = function(raw)
-		local b = buffer.create(8)
-
-		if raw == BASE_CAPABILITIES then
-			return b, 8
-		end
-
-		Binary_Descriptors.__writei64(b, 0, __COUNT_CAPABILITY_BITS(raw))
-
-		return b, 8
-	end,
-	["Path2DControlPoint"] = function(raw)
-		return Binary_Descriptors.__PACK_MULTIPLE(
-			Binary_Descriptors["UDim2"],
-			raw.Position,
-			raw.LeftTangent,
-			raw.RightTangent
-		)
-	end,
-}
-
-do -- Sequences
-	Binary_Descriptors["NumberSequence"] =
-		Binary_Descriptors.__construct_Sequence(Binary_Descriptors["NumberSequenceKeypoint"], 12)
-
-	Binary_Descriptors["ColorSequence"] =
-		Binary_Descriptors.__construct_Sequence(Binary_Descriptors["ColorSequenceKeypoint"], 20)
-end
-
-do -- Vectors
-	Binary_Descriptors.__PACK_F32 = Binary_Descriptors.__construct__PACKER(true)
-
-	Binary_Descriptors.__PACK_I16 = Binary_Descriptors.__construct__PACKER()
-end
-
-local ESCAPES_PATTERN = "[&<>\"'\0\1-\9\11-\12\14-\31\127-\255]" -- * The safe way is to escape all five characters in text. However, the three characters " ' and > needn't be escaped in text
--- %z (\0 aka NULL) might not be needed as Roblox automatically converts it to space everywhere it seems like
--- Characters from: https://create.roblox.com/docs/en-us/ui/rich-text#escape-forms
--- * EscapesPattern should be ordered from most common to least common characters for sake of speed
--- * Might wanna use their numerical codes instead of named codes for reduced file size (Could be an Option)
--- TODO Maybe we should invert the pattern to only allow certain characters (future-proof)
-local ESCAPES = {
-	["&"] = "&amp;", -- 38
-	["<"] = "&lt;", -- 60
-	[">"] = "&gt;", -- 62
-	['"'] = "&#34;", --  quot
-	["'"] = "&#39;", -- apos
-	["\0"] = "",
-}
-
-for rangeStart, rangeEnd in string.gmatch(ESCAPES_PATTERN, "(.)%-(.)") do
-	for charCode = string.byte(rangeStart), string.byte(rangeEnd) do
-		ESCAPES[string.char(charCode)] = "&#" .. charCode .. ";"
-	end
-end
-
-local XML_Descriptors
-XML_Descriptors = {
-	__CDATA = function(raw) -- ? Normally Roblox doesn't use CDATA unless the string has newline characters (\n); We rather CDATA everything for sake of speed
-		return "<![CDATA[" .. raw .. "]]>"
-	end,
-	__NORMALIZE_NUMBER = function(raw)
-		if raw ~= raw then
-			return "NAN"
-		elseif raw == math.huge then
-			return "INF"
-		elseif raw == -math.huge then
-			return "-INF"
-		end
-
-		return raw
-	end,
-	__NORMALIZE_RANGE = function(raw)
-		return raw ~= raw and "0" or raw -- Normally we should return "-nan(ind)" instead of "0" but this adds more compatibility
-	end,
-	__MINMAX = function(min, max, descriptor)
-		return "<min>" .. descriptor(min) .. "</min><max>" .. descriptor(max) .. "</max>"
-	end,
-	__PROTECTEDSTRING = function(raw) -- ? its purpose is to "protect" data from being treated as ordinary character data during processing;
-		return string_find(raw, "]]>") and string.gsub(raw, ESCAPES_PATTERN, ESCAPES) or XML_Descriptors.__CDATA(raw)
-	end,
-	__construct_Sequence = function(keypoint_handler)
-		-- The value is the text content, formatted as a space-separated list of floating point numbers.
-		-- tostring(raw) also works (but way slower rn)
-		-- ? Trailing whitespace after Envelope is needed for lune compatibility
-		return function(raw)
-			local sequence = ""
-
-			for _, keypoint in raw.Keypoints do
-				sequence ..= keypoint_handler(keypoint)
-			end
-
-			return sequence
-		end
-	end,
-	__VECTOR = function(X, Y, Z) -- Each element is a <float>
-		local Value = "<X>" .. X .. "</X><Y>" .. Y .. "</Y>" -- There is no Vector without at least two Coordinates.. (Vector1, at least on Roblox)
-
-		if Z then
-			Value ..= "<Z>" .. Z .. "</Z>"
-		end
-
-		return Value
-	end,
-	--------------------------------------------------------------
-	--------------------------------------------------------------
-	--------------------------------------------------------------
-	Axes = function(raw)
-		-- The text of this element is formatted as an integer between 0 and 7
-
-		return "<axes>" .. __COUNT_BITS(raw.X, raw.Y, raw.Z) .. "</axes>"
-	end,
-
-	-- ! Assuming all base64 encoded strings won't have newlines
-
-	BinaryString = function(raw)
-		return raw == "" and "" or base64encode(raw)
-	end,
-
-	BrickColor = function(raw)
-		return raw.Number -- * Roblox encodes the tags as "int", but this is not required for Roblox to properly decode the type. For better compatibility, it is preferred that third-party implementations encode and decode "BrickColor" tags instead. Could also use "int" or "Color3uint8"
-	end,
-	CFrame = function(raw)
-		local X, Y, Z, R00, R01, R02, R10, R11, R12, R20, R21, R22 = raw:GetComponents()
-		return XML_Descriptors.__VECTOR(X, Y, Z)
-			.. "<R00>"
-			.. R00
-			.. "</R00><R01>"
-			.. R01
-			.. "</R01><R02>"
-			.. R02
-			.. "</R02><R10>"
-			.. R10
-			.. "</R10><R11>"
-			.. R11
-			.. "</R11><R12>"
-			.. R12
-			.. "</R12><R20>"
-			.. R20
-			.. "</R20><R21>"
-			.. R21
-			.. "</R21><R22>"
-			.. R22
-			.. "</R22>",
-		"CoordinateFrame"
-	end,
-	-- CFrameQuat = function(raw) -- ? This will probably never release as it's not even used anywhere naturally, but there are hints it does exist as a DataType
-	-- 	local X, Y, Z, R00, R01, R02, R10, R11, R12, R20, R21, R22 = raw:GetComponents()
-	-- 	local trace = R00 + R11 + R22
-	-- 	local S, QW, QX, QY, QZ
-
-	-- 	if trace > 0 then
-	-- 		S = math.sqrt(1 + trace) * 2
-	-- 		QW = 0.25 * S
-	-- 		QX = (R21 - R12) / S
-	-- 		QY = (R02 - R20) / S
-	-- 		QZ = (R10 - R01) / S
-	-- 	elseif (R00 > R11) and (R00 > R22) then
-	-- 		S = math.sqrt(1 + R00 - R11 - R22) * 2
-	-- 		QW = (R21 - R12) / S
-	-- 		QX = 0.25 * S
-	-- 		QY = (R01 + R10) / S
-	-- 		QZ = (R02 + R20) / S
-	-- 	elseif R11 > R22 then
-	-- 		S = math.sqrt(1 + R11 - R00 - R22) * 2
-	-- 		QW = (R02 - R20) / S
-	-- 		QX = (R01 + R10) / S
-	-- 		QY = 0.25 * S
-	-- 		QZ = (R12 + R21) / S
-	-- 	else
-	-- 		S = math.sqrt(1 + R22 - R00 - R11) * 2
-	-- 		QW = (R10 - R01) / S
-	-- 		QX = (R02 + R20) / S
-	-- 		QY = (R12 + R21) / S
-	-- 		QZ = 0.25 * S
-	-- 	end
-
-	-- 	return XML_Descriptors.__VECTOR(X, Y, Z)
-	-- 		.. "<QX>"
-	-- 		.. QX
-	-- 		.. "</QX><QY>"
-	-- 		.. QY
-	-- 		.. "</QY><QZ>"
-	-- 		.. QZ
-	-- 		.. "</QZ><QW>"
-	-- 		.. QW
-	-- 		.. "</QW>"
-	-- end,
-	Color3 = function(raw) -- Each element is a <float>
-		return "<R>" .. raw.R .. "</R><G>" .. raw.G .. "</G><B>" .. raw.B .. "</B>" -- ? It is recommended that Color3 is encoded with elements instead of text.
-	end,
-	Color3uint8 = function(raw)
-		-- https://github.com/rojo-rbx/rbx-dom/blob/master/docs/xml.md#color3uint8
-		-- ? It is recommended that Color3uint8 is encoded with text instead of elements.
-
-		return 0xFF000000
-			+ (math.floor(raw.R * 255) * 0x10000)
-			+ (math.floor(raw.G * 255) * 0x100)
-			+ math.floor(raw.B * 255)
-		-- return bit32.bor(
-		-- 	bit32.bor(bit32.bor(bit32.lshift(0xFF, 24), bit32.lshift(0xFF * raw.R, 16)), bit32.lshift(0xFF * raw.G, 8)),
-		-- 	0xFF * raw.B
-		-- )
-
-		-- return tonumber(string.format("0xFF%02X%02X%02X",raw.R*255,raw.G*255,raw.B*255))
-	end,
-	ColorSequence = nil,
-	ColorSequenceKeypoint = function(keypoint)
-		local __NORMALIZE_RANGE = XML_Descriptors.__NORMALIZE_RANGE
-
-		local color3 = keypoint.Value
-
-		return __NORMALIZE_RANGE(keypoint.Time)
-			.. " "
-			.. __NORMALIZE_RANGE(color3.R)
-			.. " "
-			.. __NORMALIZE_RANGE(color3.G)
-			.. " "
-			.. __NORMALIZE_RANGE(color3.B)
-			.. " 0 "
-	end,
-	Content = function(raw) -- TODO Not sure about Object & Opaque, run tests when possible
-		local SourceType = raw.SourceType
-		return SourceType == Enum.ContentSourceType.None and "<null></null>"
-			or SourceType == Enum.ContentSourceType.Uri and "<uri>" .. XML_Descriptors.string(raw.Uri) .. "</uri>"
-			or SourceType == Enum.ContentSourceType.Object and "<Ref>" .. GetRef(raw.Object) .. "</Ref>"
-			or SourceType == Enum.ContentSourceType.Opaque and "<Ref>" .. GetRef(raw.Opaque) .. "</Ref>"
-	end,
-	ContentId = function(raw)
-		return raw == "" and "<null></null>" or "<url>" .. XML_Descriptors.string(raw) .. "</url>", "Content" -- TODO Remove "Content" str once Roblox fully releases Content DataType
-	end,
-	CoordinateFrame = function(raw)
-		return "<CFrame>" .. XML_Descriptors.CFrame(raw) .. "</CFrame>"
-	end,
-	-- DateTime = function(raw) return raw.UnixTimestampMillis end, -- ? Not sure
-	EnumItem = function(raw)
-		return raw.Value, "token"
-	end,
-	Faces = function(raw)
-		-- The text of this element is formatted as an integer between 0 and 63
-		return "<faces>" .. __COUNT_BITS(raw.Right, raw.Top, raw.Back, raw.Left, raw.Bottom, raw.Front) .. "</faces>"
-	end,
-	Font = 636 < CLIENT_VERSION
-		and function(raw)
-			-- TODO (OPTIONAL ELEMENT): Figure out how to determine (ContentId) <CachedFaceId><url>rbxasset://fonts/GothamSSm-Medium.otf</url></CachedFaceId>
-				--[[
-		? game:GetService("TextService"):GetFontMemoryData()
-		? rbxasset://fonts/families/{Enum.Font.BuilderSans.Name}.json
-		]]
-
-			local ok_w, weight = pcall(index, raw, "Weight")
-			local ok_s, style = pcall(index, raw, "Style")
-
-			return "<Family>"
-			.. XML_Descriptors.ContentId(raw.Family)
-			.. "</Family><Weight>"
-			.. (ok_w and XML_Descriptors.EnumItem(weight) or "")
-			.. "</Weight><Style>"
-			.. (ok_s and style.Name or "") -- Weird but this field accepts .Name of enum instead..
-			.. "</Style>"
-		end
-		or function(raw)
-			local FontString = tostring(raw) -- TODO: Temporary fix
-
-			local EmptyWeight = string_find(FontString, "Weight = ,")
-			local EmptyStyle = string_find(FontString, "Style =  }")
-
-			return "<Family>"
-			.. XML_Descriptors.ContentId(raw.Family)
-			.. "</Family><Weight>"
-			.. (EmptyWeight and "" or XML_Descriptors.EnumItem(raw.Weight))
-			.. "</Weight><Style>"
-			.. (EmptyStyle and "" or raw.Style.Name) -- Weird but this field accepts .Name of enum instead..
-			.. "</Style>"
-		end,
-	NetAssetRef = nil,
-	NumberRange = function(raw) -- tostring(raw) also works
-		-- The value is the text content, formatted as a space-separated list of floating point numbers.
-		local __NORMALIZE_RANGE = XML_Descriptors.__NORMALIZE_RANGE
-
-		return __NORMALIZE_RANGE(raw.Min) .. " " .. __NORMALIZE_RANGE(raw.Max) --[[.. " "]] -- ! This might be required for compatibility; __NORMALIZE_RANGE is not needed here but it fixes the issue where "nan 10" value would reset to "0 0"
-	end,
-	NumberSequence = nil,
-	NumberSequenceKeypoint = function(keypoint)
-		local __NORMALIZE_RANGE = XML_Descriptors.__NORMALIZE_RANGE
-
-		return __NORMALIZE_RANGE(keypoint.Time)
-			.. " "
-			.. __NORMALIZE_RANGE(keypoint.Value)
-			.. " "
-			.. __NORMALIZE_RANGE(keypoint.Envelope)
-			.. " "
-	end,
-	-- Path2DControlPoint = function(raw)  -- ? Not sure
-	-- 	local udim2 = XML_Descriptors.UDim2
-	-- 	return "<Position>"
-	-- 		.. udim2(raw.Position)
-	-- 		.. "</Position>"
-	-- 		.. "<LeftTangent>"
-	-- 		.. udim2(raw.LeftTangent)
-	-- 		.. "</LeftTangent>"
-	-- 		.. "<RightTangent>"
-	-- 		.. udim2(raw.RightTangent)
-	-- 		.. "</RightTangent>"
-	-- end,
-
-	PhysicalProperties = function(raw)
-		--[[
-			Contains at least one CustomPhysics element, which is interpreted according to the bool type. If this value is true, then the tag also contains an element for each component of the PhysicalProperties:
-
-			Density
-			Friction
-			Elasticity
-			FrictionWeight
-			ElasticityWeight
-			AcousticAbsorption
-
-			The value of each component is represented by the text content formatted as a 32-bit floating point number (see float)
-		]]
-
-		local CustomPhysics = "<CustomPhysics>" .. XML_Descriptors.bool(raw and true or false) .. "</CustomPhysics>"
-
-		return raw
-			and CustomPhysics .. "<Density>" .. raw.Density .. "</Density><Friction>" .. raw.Friction .. "</Friction><Elasticity>" .. raw.Elasticity .. "</Elasticity><FrictionWeight>" .. raw.FrictionWeight .. "</FrictionWeight><ElasticityWeight>" .. raw.ElasticityWeight .. "</ElasticityWeight><AcousticAbsorption>" .. raw.AcousticAbsorption .. "</AcousticAbsorption>"
-			or CustomPhysics
-	end,
-	-- ProtectedString = function(raw) return tostring(raw), "ProtectedString" end,
-	Ray = function(raw)
-		local vector3 = XML_Descriptors.Vector3
-
-		return "<origin>" .. vector3(raw.Origin) .. "</origin><direction>" .. vector3(raw.Direction) .. "</direction>"
-	end,
-	Rect = function(raw)
-		return XML_Descriptors.__MINMAX(raw.Min, raw.Max, XML_Descriptors.Vector2), "Rect2D"
-	end,
-	Region3 = function(raw) -- ? Not sure about xml format yet, the math is correct though (/Network/Replicator.cpp#L1306)
-		local Translation = raw.CFrame.Position
-		local HalfSize = raw.Size * 0.5
-
-		return XML_Descriptors.__MINMAX(
-			Translation - HalfSize, -- /App/util/Region3.cpp#L38
-			Translation + HalfSize, -- /App/util/Region3.cpp#L42
-			XML_Descriptors.Vector3
-		)
-	end,
-	Region3int16 = function(raw) -- ? Not sure yet (/App/v8tree/EnumProperty.cpp#L346)
-		return XML_Descriptors.__MINMAX(raw.Min, raw.Max, XML_Descriptors.Vector3int16)
-	end,
-	SharedString = function(raw)
-		raw = raw == "" and "" or base64encode(raw)
-
-		local Identifier = SharedString_identifiers[raw]
-
-		if SharedStrings[Identifier] == nil then
-			SharedStrings[Identifier] = raw
-		end
-
-		return Identifier
-	end,
-	SecurityCapabilities = function(raw)
-		if raw == BASE_CAPABILITIES then
-			return 0
-		end
-
-		return __COUNT_CAPABILITY_BITS(raw)
-	end,
-	-- SystemAddress = function(raw) return raw end, -- PeerId? systemAddress as a string in the format "IP|Port", "|" being portDelineator, should not be '.', ':', '%', '-', '/', a number, or a-f  -- ? Not sure
-	-- TweenInfo = function(raw) -- ? Not sure
-	-- 	local __NORMALIZE_NUMBER = XML_Descriptors.__NORMALIZE_NUMBER
-	-- 	local EnumItem = XML_Descriptors.EnumItem
-
-	-- 	return "<Time>"
-	-- 		.. __NORMALIZE_NUMBER(raw.Time)
-	-- 		.. "</Time><DelayTime>"
-	-- 		.. __NORMALIZE_NUMBER(raw.DelayTime)
-	-- 		.. "</DelayTime><RepeatCount>"
-	-- 		.. __NORMALIZE_NUMBER(raw.RepeatCount)
-	-- 		.. "</RepeatCount><Reverses>"
-	-- 		.. XML_Descriptors.bool(raw.Reverses)
-	-- 		.. "</Reverses><EasingDirection>"
-	-- 		.. enum(raw.EasingDirection)
-	-- 		.. "</EasingDirection><EasingStyle>"
-	-- 		.. enum(raw.EasingStyle)
-	-- 		.. "</EasingStyle>"
-	-- end,
-	UDim = function(raw)
-		--[[
-			S: Represents the Scale component. Interpreted as a <float>.
-			O: Represents the Offset component. Interpreted as an <int>.
-		]]
-
-		return "<S>" .. raw.Scale .. "</S><O>" .. raw.Offset .. "</O>"
-	end,
-	UDim2 = function(raw)
-		--[[
-			XS: Represents the X.Scale component. Interpreted as a <float>.
-			XO: Represents the X.Offset component. Interpreted as an <int>.
-			YS: Represents the Y.Scale component. Interpreted as a <float>.
-			YO: Represents the Y.Offset component. Interpreted as an <int>.
-		]]
-
-		local X, Y = raw.X, raw.Y
-
-		return "<XS>"
-			.. X.Scale
-			.. "</XS><XO>"
-			.. X.Offset
-			.. "</XO><YS>"
-			.. Y.Scale
-			.. "</YS><YO>"
-			.. Y.Offset
-			.. "</YO>"
-	end,
-
-	-- UniqueId = function(raw) -- ? Not sure  -- ? No idea if this even needs a Descriptor
-	-- 	--[[
-	-- 		UniqueId properties might be random everytime Studio saves a place file
-	-- 		and don't have a use right now outside of packages, which SSI doesn't
-	-- 		account for anyway. They generate diff noise, so we shouldn't serialize
-	-- 		them until we have to.
-	-- 	]]
-	-- 	-- https://github.com/MaximumADHD/Roblox-Client-Tracker/blob/master/LuaPackages/Packages/_Index/ApolloClient/ApolloClient/utilities/common/makeUniqueId.lua#L68
-	-- 	return raw -- seems to be string type by default
-	-- end,
-
-	Vector2 = function(raw)
-		--[[
-			X: Represents the X component. Interpreted as a <float>.
-			Y: Represents the Y component. Interpreted as a <float>.
-		]]
-		return XML_Descriptors.__VECTOR(raw.X, raw.Y)
-	end,
-	Vector2int16 = nil,
-	-- Vector2int16 = Descriptors.Vector2, -- except as <int>
-	Vector3 = function(raw)
-		--[[
-			X: Represents the X component. Interpreted as a <float>.
-			Y: Represents the Y component. Interpreted as a <float>.
-			Z: Represents the Z component. Interpreted as a <float>.
-		]]
-		return XML_Descriptors.__VECTOR(raw.X, raw.Y, raw.Z)
-	end,
-	Vector3int16 = nil,
-	-- Vector3int16 = Descriptors.Vector3, -- except as <int>\
-	bool = function(raw)
-		return raw and "true" or "false"
-	end,
-	double = nil, -- Float64
-	float = nil, -- Float32
-	int = nil, -- Int32
-	int64 = nil, -- Int64 (long)
-	string = function(raw)
-		return (raw == nil or raw == "") and ""
-			or string_find(raw, "]]>") and string.gsub(raw, ESCAPES_PATTERN, ESCAPES)
-			or XML_Descriptors.__CDATA(string.gsub(raw, "\0", ""))
-	end,
-
-	--------------------------------------------------------------
-	-----------%localappdata%/Roblox/GlobalSettings_13.xml--------
-	-----------------------settings().Studio----------------------
-	--------------------------------------------------------------
-	-- QDir = function(raw) -- ? Not sure
-	-- 	return raw
-	-- end,
-	-- QFont = function(raw) -- ? Not sure
-	-- 	return raw
-	-- end,
-}
-
-do -- Sequences
-	XML_Descriptors.NumberSequence = XML_Descriptors.__construct_Sequence(XML_Descriptors.NumberSequenceKeypoint)
-
-	XML_Descriptors.ColorSequence = XML_Descriptors.__construct_Sequence(XML_Descriptors.ColorSequenceKeypoint)
-end
-
-for descriptorName, redirectName in
-	{
-		NetAssetRef = "SharedString",
-		Vector2int16 = "Vector2",
-		Vector3int16 = "Vector3",
-		double = "__NORMALIZE_NUMBER",
-		float = "__NORMALIZE_NUMBER",
-		int = "__NORMALIZE_NUMBER",
-		int64 = "__NORMALIZE_NUMBER",
-	}
-do
-	XML_Descriptors[descriptorName] = XML_Descriptors[redirectName]
-end
-
-if CLIENT_VERSION < math.huge then -- math.huge because unknown yet
-	-- ! For sake of compatibility with older clients, Roblox currently does this too but it WILL probably change in the future so keep track of that. ONCE ROBLOX MOVES AWAY FROM THIS, MAKE SURE TO KEEP SUPPORT FOR VERY OLD CLIENTS; 645 <= CLIENT Ver < ??? (ver when roblox moves away), THIS IS COMPLICATED SO PROBABLY NO SUPPORT, JUST USE OLDER VER OF USSI; NEWEST CLIENTS
-	XML_Descriptors.Content = XML_Descriptors.ContentId
-end
-
-local ClassList
-
-do
-	local ClassPropertyExceptions = {
-		Whitelist = {
-			MeshPart = ArrayToDict({ "CollisionFidelity" }),
-			PartOperation = ArrayToDict({ "CollisionFidelity" }),
-			TriangleMeshPart = ArrayToDict({ "CollisionFidelity" }),
-		},
-		Blacklist = {
-			LuaSourceContainer = ArrayToDict({ "ScriptGuid" }),
-			Instance = ArrayToDict({ "UniqueId", "HistoryId" }),
-		},
-	}
-
-	local function AttributesSerialize(attrs)
-		-- * There are certain restrictions for names of attributes
-		-- https://create.roblox.com/docs/reference/engine/classes/Instance#SetAttribute
-		-- But it seems like even if those are present, Studio still opens the file just fine
-		-- So there is no need to check for them currently
-
-		-- ? Return early for empty tags (this proved equally as fast when done using counter/next)
-
-		local attrs_n = 0
-		local buffer_size = 4
-		local attrs_sorted = {}
-		local attrs_formatted = table.clone(attrs)
-		for attr, val in attrs do
-			attrs_n += 1
-			attrs_sorted[attrs_n] = attr
-
-			local Type = typeof(val)
-
-			local Descriptor = Binary_Descriptors[Type]
-			local attr_size
-
-			attrs_formatted[attr], attr_size = Descriptor(val)
-
-			buffer_size += 5 + #attr + attr_size
-		end
-
-		table.sort(attrs_sorted)
-
-		local b = buffer.create(buffer_size)
-
-		buffer.writeu32(b, 0, attrs_n)
-
-		local string__descriptor = Binary_Descriptors["string"]
-		local offset = 4
-		for _, attr in attrs_sorted do
-			local b_Name, Name_size = string__descriptor(attr)
-
-			buffer.copy(b, offset, b_Name)
-			offset += Name_size
-
-			buffer.writeu8(b, offset, attr_Type_IDs[typeof(attrs[attr])])
-			offset += 1
-
-			local bb = attrs_formatted[attr]
-
-			buffer.copy(b, offset, bb)
-			offset += buffer.len(bb)
-		end
-
-		return buffer.tostring(b)
-	end
-
-	local function AttenuationSerialize(attenuations)
-		if not next(attenuations) then
-			return "\0" -- ? [CONSTANT] Version byte (likely)
-		end
-
-		local attenuations_n = 0
-
-		local attenuations_sorted = {}
-
-		for key in attenuations do
-			attenuations_n += 1
-			attenuations_sorted[attenuations_n] = key
-		end
-
-		table.sort(attenuations_sorted) -- ? Seems to be sorted by default, just in case
-
-		local b = buffer.create(1 + attenuations_n * 8)
-
-		local offset = 1
-		for _, key in attenuations_sorted do
-			buffer.writef32(b, offset, key)
-			offset += 4
-			buffer.writef32(b, offset, attenuations[key]) -- volume
-			offset += 4
-		end
-
-		return buffer.tostring(b)
-	end
-
-	local function TransformsSerialize(transforms)
-		local transforms_n = #transforms
-
-		if transforms_n == 0 then
-			return "\1\0\0\0\0\0\0\0"
-		end
-
-		local b = buffer.create(8 + transforms_n * 48)
-
-		buffer.writeu32(b, 0, 1) -- ? [CONSTANT] Version byte (likely)
-		buffer.writeu32(b, 4, transforms_n)
-
-		local __PACK_F32 = Binary_Descriptors.__PACK_F32
-
-		local offset = 8
-		for _, transform in transforms do
-			local X, Y, Z, R00, R01, R02, R10, R11, R12, R20, R21, R22 = transform:GetComponents()
-
-			local xBasis = __PACK_F32(R00, R01, R02)
-			buffer.copy(b, offset, xBasis)
-			offset += 12
-
-			local yBasis = __PACK_F32(R10, R11, R12)
-			buffer.copy(b, offset, yBasis)
-			offset += 12
-
-			local zBasis = __PACK_F32(R20, R21, R22)
-			buffer.copy(b, offset, zBasis)
-			offset += 12
-
-			local position = __PACK_F32(X, Y, Z)
-			buffer.copy(b, offset, position)
-			offset += 12
-		end
-
-		return buffer.tostring(b)
-	end
-
-	local NotScriptableFixes = { --[[
-		For more info:
-		- https://github.com/luau/UniversalSynSaveInstance/blob/main/Tools/NotScriptable-Related/Potentially%20Missing%20Properties%20Dumper/Potentially%20Missing%20Properties%20Dumper.luau
-		- https://github.com/luau/UniversalSynSaveInstance/blob/main/Tools/NotScriptable-Related/NotScriptable%20Dumper/NotScriptable%20Dumper.py
-		]]
-		Instance = {
-			AttributesSerialize = function(instance)
-				local attrs = instance:GetAttributes()
-
-				if not next(attrs) then
-					return ""
-				end
-
-				return AttributesSerialize(attrs)
-			end,
-			DefinesCapabilities = "Sandboxed",
-			Tags = function(instance)
-				-- https://github.com/RobloxAPI/spec/blob/master/properties/Tags.md
-
-				local tags = service.CollectionService:GetTags(instance) -- ? Seems faster than instance:GetTags
-
-				if #tags == 0 then
-					return ""
-				end
-
-				return table.concat(tags, "\0")
-			end,
-		},
-		Path2D = {
-			PropertiesSerialize = function(instance)
-				local control_points = instance:GetControlPoints()
-				local control_points_n = #control_points
-
-				if control_points_n == 0 then
-					return "\0\0\0\0"
-				end
-
-				local b = buffer.create(4 + control_points_n * 49)
-				buffer.writeu32(b, 0, control_points_n)
-
-				local TypeID_Path2DControlPoint = attr_Type_IDs["Path2DControlPoint"]
-				local Path2DControlPoint_descriptor = Binary_Descriptors["Path2DControlPoint"]
-
-				local offset = 4
-				for i, point in control_points do
-					local buf = Path2DControlPoint_descriptor(point)
-
-					buffer.writeu8(b, offset, TypeID_Path2DControlPoint)
-					offset += 1
-
-					buffer.copy(b, offset, buf)
-					offset += 48
-				end
-
-				return buffer.tostring(b)
-			end,
-		},
-		PlayerEmulatorService = {
-			SerializedEmulatedPolicyInfo = function(instance)
-				local EmulatedPolicyInfo = instance:GetEmulatedPolicyInfo()
-
-				if not next(EmulatedPolicyInfo) then
-					return ""
-				end
-
-				return AttributesSerialize(EmulatedPolicyInfo)
-			end,
-		},
-		StyleRule = {
-			PropertiesSerialize = function(instance)
-				local props = instance:GetProperties()
-
-				if not next(props) then
-					return "\0\0\0\0" -- ! Essential
-				end
-
-				return AttributesSerialize(props)
-			end,
-		},
-		StyleQuery = {
-			ConditionsSerialize = function(instance)
-				local props = instance:GetConditions()
-
-				if not next(props) then
-					return "\0\0\0\0"
-				end
-
-				return AttributesSerialize(props)
-			end,
-		},
-		MarkerCurve = {
-			ValuesAndTimes = function(instance)
-				local markers = instance:GetMarkers()
-				local markers_n = #markers
-
-				if markers_n == 0 then
-					-- return "" -- Seems to also work
-					return "\2\0\0\0\0\0\0\0\1\0\0\0\0\0\0\0"
-				end
-
-				local strings_size = 0
-				for i, marker in markers do
-					strings_size += #marker.Value + 1
-				end
-
-				local b = buffer.create(8 + strings_size + 8 + (markers_n * 4))
-
-				-- Values section
-				buffer.writeu32(b, 0, 2) -- Constant
-				buffer.writeu32(b, 4, markers_n)
-
-				local offset = 8
-				for i, marker in markers do
-					local value = marker.Value
-					buffer.writestring(b, offset, value)
-					offset += #value + 1
-					-- buffer.writeu8(b, offset, 0) -- Null terminator
-					-- offset += 1
-				end
-
-				-- Times section (as 2400x scaled integers)
-				buffer.writeu32(b, offset, 1) -- Constant
-				offset += 4
-				buffer.writeu32(b, offset, markers_n)
-				offset += 4
-
-				for i, marker in markers do
-					local scaled_time = math.round(marker.Time * 2400)
-					buffer.writeu32(b, offset, scaled_time)
-					offset += 4
-				end
-
-				return buffer.tostring(b)
-			end,
-		},
-		AnimationNodeDefinition = {
-			InputPinData = function(instance)
-				local input_pins = instance:GetInputPins()
-
-				local input_pins_n = #input_pins
-
-				if input_pins_n == 0 then
-					return "\1\0\0\0\0\0\0\0"
-				end
-
-				local buffer_size = 8
-
-				for _, pin in input_pins do
-					buffer_size += 4 + #pin
-				end
-
-				local b = buffer.create(buffer_size)
-
-				buffer.writeu32(b, 0, 1) -- ? [CONSTANT] Version byte (likely)
-				buffer.writeu32(b, 4, input_pins_n)
-
-				local string__descriptor = Binary_Descriptors["string"]
-				local offset = 8
-				for _, pin in input_pins do
-					local b_pin, pin_size = string__descriptor(pin)
-
-					buffer.copy(b, offset, b_pin)
-					offset += pin_size
-				end
-
-				return buffer.tostring(b)
-			end,
-		},
-		AnimationRigData = {
-			label = function(instance)
-				local labels = instance:GetLabels() -- RobloxScriptSecurity
-				local labels_n = #labels
-
-				if labels_n == 0 then
-					return "\1\0\0\0\0\0\0\0"
-				end
-
-				local b = buffer.create(8 + labels_n * 4)
-
-				buffer.writeu32(b, 0, 1) -- ? [CONSTANT] Version byte (likely)
-				buffer.writeu32(b, 4, labels_n)
-
-				local offset = 8
-
-				for _, label in labels do
-					buffer.writeu32(b, offset, label)
-					offset += 4
-				end
-
-				return buffer.tostring(b)
-			end,
-			name = function(instance)
-				local names = instance:GetNames() -- RobloxScriptSecurity
-				local names_n = #names
-
-				if names_n == 0 then
-					return "\1\0\0\0\0\0\0\0"
-				end
-
-				local buffer_size = 8
-
-				for _, name in names do
-					buffer_size += 4 + #name
-				end
-
-				local b = buffer.create(buffer_size)
-
-				buffer.writeu32(b, 0, 1) -- ? [CONSTANT] Version byte (likely)
-				buffer.writeu32(b, 4, names_n)
-
-				local offset = 8
-
-				for _, name in names do
-					buffer.writeu32(b, offset, #name)
-					offset += 4
-				end
-				for _, name in names do
-					buffer.writestring(b, offset, name)
-					offset += #name
-				end
-
-				return buffer.tostring(b)
-			end,
-			parent = function(instance)
-				local parents = instance:GetParents() -- RobloxScriptSecurity
-				local parents_n = #parents
-
-				if parents_n == 0 then
-					return "\1\0\0\0\0\0\0\0"
-				end
-
-				local b = buffer.create(8 + #parents * 2)
-
-				buffer.writeu32(b, 0, 1) -- ? [CONSTANT] Version byte (likely)
-				buffer.writeu32(b, 4, parents_n)
-
-				local offset = 8
-
-				for _, parent in parents do
-					buffer.writeu16(b, offset, parent) -- ? likely u8 with \0 (Null) terminators but this is safer in case they overflow beyond 255 values
-					offset += 2
-				end
-
-				return buffer.tostring(b)
-			end,
-			postTransform = function(instance)
-				return TransformsSerialize(instance:GetPostTransforms()) -- RobloxScriptSecurity
-			end,
-			preTransform = function(instance)
-				return TransformsSerialize(instance:GetPreTransforms()) -- RobloxScriptSecurity
-			end,
-			transform = function(instance)
-				return TransformsSerialize(instance:GetTransforms()) -- RobloxScriptSecurity
-			end,
-		},
-		AudioDeviceInput = {
-			AccessList = function(instance) -- CanSave & CanLoad false
-				local userid_accesslist = instance:GetUserIdAccessList()
-
-				local uid_n = #userid_accesslist
-
-				if uid_n == 0 then
-					return ""
-				end
-
-				local b = buffer.create(uid_n * 8)
-
-				local __writei64 = Binary_Descriptors.__writei64
-
-				local offset = 0
-				for _, user_id in userid_accesslist do
-					__writei64(b, offset, user_id)
-					offset += 8
-				end
-
-				return buffer.tostring(b)
-			end,
-		},
-		AudioEmitter = {
-			AngleAttenuation = function(instance)
-				return AttenuationSerialize(instance:GetAngleAttenuation())
-			end,
-			DistanceAttenuation = function(instance)
-				return AttenuationSerialize(instance:GetDistanceAttenuation())
-			end,
-		},
-		AudioListener = {
-			AngleAttenuation = function(instance)
-				return AttenuationSerialize(instance:GetAngleAttenuation())
-			end,
-			DistanceAttenuation = function(instance)
-				return AttenuationSerialize(instance:GetDistanceAttenuation())
-			end,
-		},
-		-- DebuggerBreakpoint = {line="Line"}, -- ? This shouldn't appear in live games (try to prove this wrong)
-		BallSocketConstraint = { MaxFrictionTorqueXml = "MaxFrictionTorque" },
-		BasePart = {
-			Color3uint8 = "Color",
-			MaterialVariantSerialized = "MaterialVariant",
-			size = "Size",
-		},
-		DoubleConstrainedValue = { value = "Value" },
-		IntConstrainedValue = { value = "Value" },
-
-		-- CustomEvent = {PersistedCurrentValue=function(instance) -- * Class is Deprecated and :SetValue doesn't seem to affect GetCurrentValue anymore
-		-- 	local Receiver  = instance:GetAttachedReceivers()[1]
-		-- 	if Receiver then
-		-- 		return Receiver:GetCurrentValue()
-		-- 	else
-		-- 		error("No Receiver", 2)
-		-- 	end
-		-- end},
-		Terrain = {
-			AcquisitionMethod = "LastUsedModificationMethod", -- ? Not sure, RobloxScriptSecurity
-			MaterialColors = function(instance) -- https://github.com/RobloxAPI/spec/blob/master/properties/MaterialColors.md
-				local TERRAIN_MATERIAL_COLORS =
-					{ --https://github.com/rojo-rbx/rbx-dom/blob/master/rbx_dom_lua/src/customProperties.lua#L5
-						Enum.Material.Grass,
-						Enum.Material.Slate,
-						Enum.Material.Concrete,
-						Enum.Material.Brick,
-						Enum.Material.Sand,
-						Enum.Material.WoodPlanks,
-						Enum.Material.Rock,
-						Enum.Material.Glacier,
-						Enum.Material.Snow,
-						Enum.Material.Sandstone,
-						Enum.Material.Mud,
-						Enum.Material.Basalt,
-						Enum.Material.Ground,
-						Enum.Material.CrackedLava,
-						Enum.Material.Asphalt,
-						Enum.Material.Cobblestone,
-						Enum.Material.Ice,
-						Enum.Material.LeafyGrass,
-						Enum.Material.Salt,
-						Enum.Material.Limestone,
-						Enum.Material.Pavement,
-					}
-
-				local b = buffer.create(69) -- 69 bytes: 6 reserved + 63 for colors (21 materials * 3 components)
-				local offset = 6 -- 6 reserved bytes
-
-				local RGB_components = { "R", "G", "B" }
-
-				for _, material in TERRAIN_MATERIAL_COLORS do
-					local color = instance:GetMaterialColor(material)
-					for _, component in RGB_components do
-						buffer.writeu8(b, offset, math.floor(color[component] * 255)) -- ? math.floor seems unneeded but it makes it faster
-						offset += 1
-					end
-				end
-
-				return buffer.tostring(b)
-			end,
-		},
-		TriangleMeshPart = {
-			FluidFidelityInternal = "FluidFidelity",
-		},
-		MeshPart = { InitialSize = "MeshSize" },
-		PartOperation = { InitialSize = "MeshSize" },
-		Part = { shape = "Shape" },
-		TrussPart = { style = "Style" },
-		FormFactorPart = {
-			formFactorRaw = "FormFactor",
-		},
-		Fire = { heat_xml = "Heat", size_xml = "Size" },
-		Humanoid = { Health_XML = "Health" },
-		HumanoidDescription = {
-			EmotesDataInternal = function(instance)
-				local emotes_data = ""
-				for name, ids in instance:GetEmotes() do
-					emotes_data ..= name .. "^" .. table.concat(ids, "^") .. "^\\"
-				end
-				return emotes_data
-			end,
-			EquippedEmotesDataInternal = function(instance)
-				local equipped_emotes_data = ""
-				for _, emote in instance:GetEquippedEmotes() do
-					equipped_emotes_data ..= emote.Slot .. "^" .. emote.Name .. "\\"
-				end
-				return equipped_emotes_data
-			end,
-		},
-		LocalizationTable = {
-			Contents = function(instance)
-				return instance:GetContents() --service.HttpService:JSONEncode(instance:GetEntries())
-			end,
-		},
-		MaterialService = { Use2022MaterialsXml = "Use2022Materials" }, -- RobloxScriptSecurity
-
-		Model = {
-			ScaleFactor = function(instance)
-				return instance:GetScale()
-			end,
-			WorldPivotData = "WorldPivot", -- TODO This doesn't accurately represent whether optional type property is present or not (it's never nil), gethiddenproperty or gethiddenproperty_fallback is preferred
-		},
-		PackageLink = { PackageIdSerialize = "PackageId", VersionIdSerialize = "VersionNumber" },
-		Players = { MaxPlayersInternal = "MaxPlayers", PreferredPlayersInternal = "PreferredPlayers" }, -- ? Only needed for execs that lack LocalUserSecurity (Level 2, 5, 9), even so, it's a pretty useless information as it can be viewed elsewhere
-
-		StarterPlayer = { AvatarJointUpgrade_Serialized = "AvatarJointUpgrade" },
-		Smoke = { size_xml = "Size", opacity_xml = "Opacity", riseVelocity_xml = "RiseVelocity" },
-		Sound = {
-			xmlRead_MaxDistance_3 = "RollOffMaxDistance", -- * Also MaxDistance
-		},
-		-- ViewportFrame = { -- * Pointless because these reflect CurrentCamera's properties
-		-- 	CameraCFrame = function(instance) -- *
-		-- 		local CurrentCamera = instance.CurrentCamera
-		-- 		if CurrentCamera then
-		-- 			return CurrentCamera.CFrame
-		-- 		else
-		-- 			error("No CurrentCamera", 2)
-		-- 		end
-		-- 	end,
-		-- 	-- CameraFieldOfView =
-		-- },
-		WeldConstraint = {
-			Part0Internal = "Part0",
-			Part1Internal = "Part1",
-			-- State = function(instance)
-			-- 	-- If untouched then default state is 3 (default true)
-			-- 	return instance.Enabled and 1 or 0
-			-- end,
-		},
-		Workspace = {
-			-- SignalBehavior2 = "SignalBehavior", -- * Both are NotScriptable so it doesn't make sense to keep
-			CollisionGroupData = function()
-				local collision_groups = game:GetService("PhysicsService"):GetRegisteredCollisionGroups()
-
-				local col_groups_n = #collision_groups
-
-				if col_groups_n == 0 then
-					return "\1\0"
-				end
-
-				local buffer_size = 2 -- Initial size
-
-				for _, group in collision_groups do
-					buffer_size += 7 + #group.name
-				end
-
-				local b = buffer.create(buffer_size)
-
-				buffer.writeu8(b, 0, 1) -- ? [CONSTANT] Version byte (likely)
-				buffer.writeu8(b, 1, col_groups_n) -- Group count
-
-				local TypeID_int32 = attr_Type_IDs["int32"]
-				local offset = 2
-				for i, group in collision_groups do
-					local name, id, mask = group.name, i - 1, group.mask
-					local name_len = #name
-
-					buffer.writeu8(b, offset, id) -- ID
-					offset += 1
-
-					buffer.writeu8(b, offset, TypeID_int32) -- ? Type ID for int32 (0x04)
-					offset += 1
-
-					buffer.writei32(b, offset, mask) -- Mask value as signed 32-bit integer
-					offset += 4
-
-					buffer.writeu8(b, offset, name_len) -- Name length
-					offset += 1
-					buffer.writestring(b, offset, name) -- Name
-					offset += name_len
-				end
-
-				return buffer.tostring(b)
-			end,
-		},
-	}
-
-	local function FetchAPI()
-		-- Credits @MaximumADHD
-
-		local API_Dump
-
-		local ok, err = pcall(function()
-			if EXECUTOR_NAME == "Velocity" then -- TODO Temp fix as it crashes on HttpGet for sites that return 403 code
-				return
-			end
-
-			local CLIENT_VERSION_str = tostring(CLIENT_VERSION)
-			local ok, result = pcall(readfile, CLIENT_VERSION_str)
-			if
-				ok
-				and result
-				and result ~= ""
-				and pcall(service.HttpService.JSONDecode, service.HttpService, result)
-			then
-				API_Dump = result
-				return
-			end
-
-			local matching_versions, is_matched = {}
-
-			-- * https://setup.rbxcdn.com/versionQTStudio seems to be a bit behind DeployHistory.txt
-			local DeployHistory = string.split(game:HttpGet("https://setup.rbxcdn.com/DeployHistory.txt", true), "\n")
-			for i = #DeployHistory, 1, -1 do
-				local line = DeployHistory[i]
-
-				local file_version = string.match(line, "file version: ([%d, ]+)")
-				if file_version then
-					if string.split(file_version, ", ")[2] == CLIENT_VERSION_str then
-						is_matched = true
-
-						local version_hash = string.match(line, "(version%-[^%s]+)")
-						if version_hash then
-							matching_versions[version_hash] = true
-						end
-					elseif is_matched then
-						break
-					end
-				end
-			end
-
-			for version_hash in matching_versions do
-				ok, result = pcall(
-					game.HttpGet,
-					game,
-					"https://setup.rbxcdn.com/" .. version_hash .. "-Full-API-Dump.json",
-					true
-				)
-				if ok then
-					local o, r = pcall(service.HttpService.JSONDecode, service.HttpService, result)
-					if o then
-						API_Dump = service.HttpService:JSONEncode(r.Classes) -- minify it
-						break
-					end
-				end
-			end
-			if writefile then
-				writefile(CLIENT_VERSION_str, API_Dump)
-			end
-		end)
-
-		if not ok or not API_Dump then
-			warn("[DEBUG] Failed to get " .. version() .. " version API Dump, trying latest..")
-			warn("[DEBUG]", err)
-			API_Dump = service.HttpService:JSONEncode(
-				service.HttpService:JSONDecode(
-					game:HttpGet(
-						"https://raw.githubusercontent.com/MaximumADHD/Roblox-Client-Tracker/roblox/Mini-API-Dump.json",
-						true
-					)
-				).Classes
-			)
-		end
-
-		local classList = {}
-
-		local ClassesWhitelist, ClassesBlacklist = ClassPropertyExceptions.Whitelist, ClassPropertyExceptions.Blacklist
-
-		for _, API_Class in service.HttpService:JSONDecode(API_Dump) do
-			local ClassProperties, ClassProperties_size = {}, 1
-			local Class = {
-				Properties = ClassProperties,
-				Superclass = API_Class.Superclass,
-				-- Tags = {},
-				NotCreatable = nil,
-			}
-
-			local ClassName = API_Class.Name
-			local ClassTags = API_Class.Tags
-
-			if ClassTags then
-				local Tags = ArrayToDict(ClassTags, nil, nil, "string")
-				-- Class.Tags = Tags -- or {}
-				Class.NotCreatable = Tags.NotCreatable
-				Class.Service = Tags.Service
-			end
-
-			local NotScriptableFixClass = NotScriptableFixes[ClassName]
-
-			-- ? Check 96ea8b2a755e55a78aedb55a7de7e83980e11077 commit - If a NotScriptableFix is needed that relies on another NotScriptable Property (which doesn't really make sense in the first place)
-
-			local ClassWhitelist, ClassBlacklist = ClassesWhitelist[ClassName], ClassesBlacklist[ClassName]
-
-			for _, Member in API_Class.Members do
-				-- ? print(game:GetService("ReflectionService"):GetPropertyNames("TextBox"))
-				if Member.MemberType == "Property" then
-					local Serialization = Member.Serialization
-
-					if Serialization.CanLoad then -- If Roblox doesn't save it why should we; If Roblox doesn't load it we don't need to save it
-						--[[
-							-- ! CanSave replaces "Tags.Deprecated" check because there are some old properties which are deprecated yet have CanSave.
-							Example: Humanoid.Health is CanSave false due to Humanoid.Health_XML being CanSave true (obsolete properties basically) - in this case both of them will Load. (aka PropertyPatches)
-							CanSave being on same level as CanLoad also fixes potential issues with overlapping properties like Color, Color3 & Color3uint8 of BasePart, out of which only Color3uint8 should save
-							This also fixes everything in IgnoreClassProperties automatically without need to hardcode :)
-							A very simple fix for many problems that saveinstance scripts encounter!
-						--]]
-						local PropertyName = Member.Name
-						if
-							(Serialization.CanSave or ClassWhitelist and ClassWhitelist[PropertyName])
-							and not (ClassBlacklist and ClassBlacklist[PropertyName])
-						then
-							local MemberTags = Member.Tags
-
-							local ValueType = Member.ValueType
-							local ValueType_Name = ValueType.Name
-
-							if 645 <= CLIENT_VERSION and ValueType_Name == "Content" then -- TODO: Remove after Roblox adds a descriptor for it
-								continue
-							end
-
-							local Special, PreferredDescriptorName
-
-							if MemberTags then
-								for _, tag in MemberTags do
-									if type(tag) == "table" then
-										PreferredDescriptorName = tag.PreferredDescriptorName
-										if PreferredDescriptorName and Special then
-											break
-										end
-									elseif tag == "NotScriptable" then
-										Special = true
-										if PreferredDescriptorName then
-											break
-										end
-									end
-								end
-							end
-
-							-- if not Special then
-							local Property = {
-								Name = PropertyName,
-								Category = ValueType.Category,
-								-- Default = Member.Default,
-								-- Tags = MemberTags,
-								ValueType = ValueType_Name,
-
-								Special = Special,
-
-								CanRead = nil,
-							}
-
-							if string.sub(ValueType_Name, 1, 8) == "Optional" then
-								-- Extract the string after "Optional"
-								Property.Optional = string.sub(ValueType_Name, 9)
-							end
-
-							if NotScriptableFixClass then
-								local NotScriptableFix = NotScriptableFixClass[PropertyName]
-								if NotScriptableFix then
-									Property.Fallback = type(NotScriptableFix) == "function" and NotScriptableFix
-										or PreferredDescriptorName and function(instance)
-											local o, r = pcall(index, instance, PreferredDescriptorName)
-											if o then
-												return r
-											end
-											return instance[NotScriptableFix]
-										end
-										or function(instance)
-											return instance[NotScriptableFix]
-										end
-								end
-							elseif PreferredDescriptorName then
-								Property.Fallback = function(instance)
-									return instance[PreferredDescriptorName]
-								end
-							end
-							ClassProperties[ClassProperties_size] = Property
-							ClassProperties_size += 1
-
-							-- end
-						end
-					end
-				end
-			end
-
-			classList[ClassName] = Class
-		end
-
-		-- classList.Instance.Properties.Parent = nil -- ? Not sure if this is a better option than filtering through properties to remove this
-
-		return classList
-	end
-
-	local ok, result = pcall(FetchAPI)
-	if ok then
-		ClassList = result
-	else
-		warn("Failed to load the API Dump")
-		warn(result)
-		return
-	end
-end
-
-local GLOBAL_ENV = getgenv and getgenv() or _G or shared
-
---[=[
-    @class SynSaveInstance
-    Represents the options for saving instances with custom settings using the synsaveinstance function.
-]=]
-
---- @interface CustomOptions table
---- * Structure of the main CustomOptions table.
---- * Note: Options are case-insensitive, meaning you could type `NilInstances` option as `nilInStaNces` and it would still be valid.
---- @within SynSaveInstance
---- @field __DEBUG_MODE boolean -- This will print debug logs to console about unusual scenarios. Recommended to enable if you wish to help us improve our products and find bugs / issues with it! ___Default:___ false
---- @field ReadMe boolean --___Default:___ true
---- @field SafeMode boolean -- Kicks you before Saving, which prevents you from being detected in any game. ___Default:___ false
---- @field ShutdownWhenDone boolean -- Shuts the game down after saveinstance is finished. ___Default:___ false
---- @field AntiIdle boolean -- Prevents the 20-minute-Idle Kick. ___Default:___ true
---- .Anonymous {boolean|table{UserId = string, Name = string}} -- * **RISKY:** Cleans the file of any info related to your account like: Name, UserId. This is useful for some games that might store that info in GUIs or other Instances. Might potentially mess up parts of strings that contain characters that match your Name or parts of numbers that match your UserId. Can also be a table with UserId & Name keys. ___Default:___ false
---- @field ShowStatus boolean -- ___Default:___ true
---- @field Callback function -- If set, the serialized data will be sent to the callback function instead of to file. ___Default:___ false
---- @field mode string -- Valid modes: full, optimized, scripts. Change this to invalid mode like "invalid" if you only want ExtraInstances. "optimized" mode is **NOT** supported with *@Object* option. ___Default:___ `"optimized"`
---- @field noscripts boolean -- ___Aliases:___ `Decompile`. ___Default:___ false
---- @field scriptcache boolean -- ___Default:___ true
---- @field decomptype string -- * Deprecated. ___Default:___ Uses your executor's decompiler, if available.
---- @field timeout number -- If the decompilation run time exceeds this value it gets cancelled. Set to -1 to disable timeout (unreliable). ***Aliases***: `DecompileTimeout`. ___Default:___ 10
---- @field DecompileJobless boolean -- Includes already decompiled code in the output. No new scripts are decompiled. ___Default:___ false
---- @field SaveBytecode boolean -- Includes bytecode in the output. Useful if you wish to be able to decompile it yourself later. ___Default:___ false
---- .DecompileIgnore {Instance | Instance.ClassName | [Instance.ClassName] = {Instance.Name}} -- * Ignores match & it's descendants by default. To Ignore only the instance itself set the value to `= false`. Examples: "Chat", - Matches any instance with "Chat" ClassName, Players = {"MyPlayerName"} - Matches "Players" Class AND "MyPlayerName" Name ONLY, `workspace` - matches Instance by reference, `[workspace] = false` - matches Instance by reference and only ignores the instance itself and not it's descendants. ___Default:___ {TextChatService}
---- .IgnoreList {Instance | Instance.ClassName | [Instance.ClassName] = {Instance.Name}} -- Structure is similar to **@DecompileIgnore** except `= false` meaning if you ignore one instance it will automatically ignore it's descendants. ___Default:___ {CoreGui, CorePackages}
---- .ExtraInstances {Instance} -- If used with any invalid mode (like "invalidmode") it will only save these instances. ___Default:___ {}
---- @field IgnoreProperties table -- Ignores properties by Name. ___Default:___ {}
---- @field SaveCacheInterval number -- The less the value the more often it saves, but that would mean less performance due to constantly saving. ___Default:___ 0x1600 * 10
---- @field FilePath string -- Must only contain the name of the file, no file extension. ___Default:___ false
---- @field AvoidFileOverwrite boolean -- Prevents writing to place file that already exists. ___Default:___ true
---- @field Object Instance -- * If provided, saves as .rbxmx (Model file) instead. If Object is game, it will be saved as a .rbxl file. **MUST BE AN INSTANCE REFERENCE, FOR EXAMPLE - *game.Workspace***. `"optimized"` mode is **NOT** supported with this option. If IsModel is set to false then Object specified here will be saved as a place file. ___Default:___ false
---- @field IsModel boolean -- If Object is specified then sets to true automatically, unless you set it to false. ___Default:___ false
---- @field NilInstances boolean -- Save instances that aren't Parented (Parented to nil). ___Default:___ false
---- .NilInstancesFixes {[Instance.ClassName] = function} -- * This can cause some Classes to be fixed even though they might not need the fix (better be safe than sorry though). For example, Bones inherit from Attachment if we dont define them in the NilInstancesFixes then this will catch them anyways. **TO AVOID THIS BEHAVIOR USE THIS EXAMPLE:** {ClassName_That_Doesnt_Need_Fix = false}. ___Default:___ {Animator = function, AdPortal = function, BaseWrap = function, Attachment = function}
---- @field IgnoreDefaultProperties boolean -- Ignores default properties during saving.  ___Default:___ true
---- @field IgnoreNotArchivable boolean -- Ignores the Archivable property and saves Non-Archivable instances. ___Default:___ true
---- @field IgnorePropertiesOfNotScriptsOnScriptsMode boolean -- Ignores property of every instance that is not a script in "scripts" mode. ___Default:___ false
---- @field IgnoreSpecialProperties boolean -- Prevents calls to `gethiddenproperty` and uses fallback methods instead. This also helps with crashes. If your file is corrupted after saving, you can try turning this on. ___Default:___ false
---- @field IsolateLocalPlayer boolean -- Saves Children of LocalPlayer as separate folder and prevents any instance of ClassName Player with .Name identical to LocalPlayer.Name from saving. ___Default:___ false
---- @field IsolateStarterPlayer boolean -- If enabled, StarterPlayer will be cleared and the saved starter player will be placed into folders. ___Default:___ false
---- @field IsolateLocalPlayerCharacter boolean -- Saves Children of LocalPlayer.Character as separate folder and prevents any instance of ClassName Player with .Name identical to LocalPlayer.Name from saving. ___Default:___ false
---- @field RemovePlayerCharacters boolean -- Ignore player characters while saving. (Enables SaveNotCreatable automatically). ___Default:___ true
---- @field SaveNotCreatable boolean -- * Includes non-serializable instances as Folder objects (Name is misleading as this is mostly a fix for certain NilInstances and isn't always related to NotCreatable). ___Default:___ false
---- .NotCreatableFixes table<Instance.ClassName> -- * {"Player"} is the same as {Player = "Folder"}; Format like {SpawnLocation = "Part"} is only to be used when SpawnLocation inherits from "Part" AND "Part" is Creatable. ___Default:___ { "", "Player", "PlayerScripts", "PlayerGui", "TouchTransmitter" }
---- @field IsolatePlayers boolean -- * This option does save players, it's just they won't show up in Studio and can only be viewed through the place file code (in text editor). More info at https://github.com/luau/UniversalSynSaveInstance/issues/2. ___Default:___ false
---- @field AlternativeWritefile boolean -- * Splits file content string into segments and writes them using appendfile. This might help with crashes when it starts writing to file. Though there is a risk of appendfile working incorrectly on some executors. ___Default:___ true
---- @field IgnoreDefaultPlayerScripts boolean -- * **RISKY: Ignores Default PlayerScripts like PlayerModule & RbxCharacterSounds. Prevents crashes on certain Executors. ___Default:___ true
---- @field IgnoreSharedStrings boolean -- * **RISKY: FIXES CRASHES (TEMPORARY, TESTED ON ROEXEC ONLY). FEEL FREE TO DISABLE THIS TO SEE IF IT WORKS FOR YOU**. ___Default:___ true
---- @field SharedStringOverwrite boolean -- * **RISKY:** if the process is not finished aka crashed then none of the affected values will be available. SharedStrings can also be used for ValueTypes that aren't `SharedString`, this behavior is not documented anywhere but makes sense (Could create issues though, due to _potential_ ValueType mix-up, only works on certain types which are all base64 encoded so far). Reason: Allows for potential smaller file size (can also be bigger in some cases). ___Default:___ false
---- @field TreatUnionsAsParts boolean -- * **RISKY:** Converts all UnionOperations to Parts. Useful if your Executor isn't able to save (read) Unions, because otherwise they will be invisible. ___Default:___ false (except Solara)
-
---- @interface OptionsAliases
---- @within SynSaveInstance
---- Aliases for the [SynSaveInstance.CustomOptions table]. Format: {Option -- Alias1, Alias2}
---- @field FilePath string -- FileName
---- @field IgnoreDefaultProperties string -- IgnoreDefaultProps
---- @field SaveNotCreatable string -- SaveNonCreatable
---- @field InstancesBlacklist string -- IgnoreList
---- @field IsolatePlayerGui string -- IsolateLocalPlayer
---- @field IsolatePlayers string -- SavePlayers
---- @field scriptcache string -- DecompileJobless
---- @field timeout string -- DecompileTimeout
---- @field IgnoreNotArchivable string -- IgnoreArchivable
---- @field RemovePlayerCharacters string -- INVERSE SavePlayerCharacters
-
---[=[
-	@function saveinstance
-	Saves instances with specified options. Example:
-	```lua
-	local Params = {
-		RepoURL = "https://raw.githubusercontent.com/luau/SynSaveInstance/main/",
-		SSI = "saveinstance",
-	}
-
-	local synsaveinstance = loadstring(game:HttpGet(Params.RepoURL .. Params.SSI .. ".luau", true), Params.SSI)()
-
-	local CustomOptions = { SafeMode = true, timeout = 15, SaveBytecode = true }
-
-	synsaveinstance(CustomOptions)
-	```
-	@within SynSaveInstance
-	@yields
-	@param Parameter_1 variant<table, table<Instance>> -- Can either be [SynSaveInstance.CustomOptions table] or a filled with instances ({Instance}), (then it will be treated as ExtraInstances with an invalid mode and IsModel will be true).
-	@param Parameter_2 table -- [OPTIONAL] If present, then Parameter_2 will be assumed to be [SynSaveInstance.CustomOptions table]. And then if the Parameter_1 is an Instance, then it will be assumed to be [SynSaveInstance.CustomOptions table].Object. If Parameter_1 is a table filled with instances ({Instance}), then it will be assumed to be [SynSaveInstance.CustomOptions table].ExtraInstances and IsModel will be true). This exists for sake compatibility with `saveinstance(game, {})`
-]=]
-
-local function synsaveinstance(CustomOptions, CustomOptions2)
-	if GLOBAL_ENV.USSI then
-		return
-	end
-	GLOBAL_ENV.USSI = true
-	do
-		local setthreadidentity = global_container.setthreadidentity
-		if setthreadidentity then
-			pcall(setthreadidentity, 8) -- ? Arceus X Fix
-		end
-	end
-
-	local currentstr, currentsize, totalsize, chunks = "", 0, 0, table.create(1)
-	local savebuffer, savebuffer_size = {}, 1
-	local header =
-		'<!-- Decompiled by ViciousVault (Join to Copy Games) https://discord.com/invite/C3ekgzuxFy --><roblox version="4">'
-
-	local StatusText
-
-	local OPTIONS = {
-		usekonstantdecompiler = false,
-		mode = "optimized",
-		noscripts = false,
-		scriptcache = true,
-		-- decomptype = "",
-		timeout = 10,
-		-- * New:
-		__DEBUG_MODE = false,
-
-		-- Binary = false, -- true in syn newer versions (false in our case because no binary support yet), Description: Saves everything in Binary Mode (rbxl/rbxm).
-		Callback = false,
-		--Clipboard/CopyToClipboard = false, -- Description: If set to true, the serialized data will be set to the clipboard, which can be later pasted into studio easily. Useful for saving models. (Binary Only)
-		-- MaxThreads = 3 -- Description: The number of decompilation threads that can run at once. More threads means it can decompile for scripts at a time.
-		-- DisableCompression = false, --Description: Disables compression in the binary output
-
-		DecompileJobless = false,
-		DecompileIgnore = { -- * Clean these up (merged Old Syn and New Syn)
-			-- "Chat",
-			"TextChatService",
-			ModuleScript = nil,
-		},
-		IgnoreDefaultPlayerScripts = true,
-		SaveBytecode = false,
-
-		IgnoreProperties = {},
-
-		IgnoreList = { "CoreGui", "CorePackages" },
-
-		ExtraInstances = {},
-		NilInstances = false,
-		NilInstancesFixes = {},
-
-		SaveCacheInterval = 0x1600 * 10,
-		ShowStatus = true,
-		SafeMode = false,
-		ShutdownWhenDone = false,
-		AntiIdle = true,
-		Anonymous = false,
-		ReadMe = true,
-        WatermarkGui = true,
-		FilePath = false,
-		AvoidFileOverwrite = true,
-		Object = false,
-		IsModel = false,
-
-		IgnoreDefaultProperties = true,
-		IgnoreNotArchivable = true,
-		IgnorePropertiesOfNotScriptsOnScriptsMode = false,
-		IgnoreSpecialProperties = not pcall(function() return gethiddenproperty(workspace.Terrain, "SmoothGrid") end),
-
-		IsolateLocalPlayer = false, --  #service.StarterGui:GetChildren() == 0
-		IsolateLocalPlayerCharacter = false,
-		IsolatePlayers = false,
-		IsolateStarterPlayer = false,
-		RemovePlayerCharacters = true,
-
-		SaveNotCreatable = false,
-		NotCreatableFixes = {
-			-- "InputObject",
-			-- "LodDataEntity",
-			-- "Path",
-			"", -- * FilteredSelection
-			"AdvancedDragger",
-			"AnimationTrack",
-			"Dragger",
-			"Player",
-			"PlayerGui",
-			"PlayerMouse",
-			"PlayerMouse",
-			"PlayerScripts",
-			"ScreenshotHud",
-			"StudioData",
-			"TextChatMessage",
-			"TextSource",
-			"TouchTransmitter",
-			"Translator",
-			CloudLocalizationTable = "LocalizationTable",
-			Platform = "Part",
-			Status = "Model", -- gets created by studio automatically usually so there will be duplicates due to this
-			-- CoreScript = "Script", -- useless
-			-- ChatWindowMessageProperties = "TextChatMessageProperties", -- ? Not needed as this can be derived with ChatWindowConfiguration.DeriveNewMessageProperties
-		},
-
-		-- ! Risky
-
-		IgnoreSharedStrings = EXECUTOR_NAME ~= "Wave",
-		SharedStringOverwrite = false,
-		TreatUnionsAsParts = EXECUTOR_NAME == "Solara", -- TODO Temporary true (once removed, remove Note from docs too)
-		AlternativeWritefile = not ArrayToDict({ "WRD", "Xeno", "Zorara" })[EXECUTOR_NAME],
-
-		OptionsAliases = { -- You can't really modify these as a user
-			DecompileTimeout = "timeout",
-			FileName = "FilePath",
-			IgnoreArchivable = "IgnoreNotArchivable",
-			IgnoreDefaultProps = "IgnoreDefaultProperties",
-			InstancesBlacklist = "IgnoreList",
-			IsolatePlayerGui = "IsolateLocalPlayer",
-			SaveNonCreatable = "SaveNotCreatable",
-			SavePlayers = "IsolatePlayers",
-		},
-	}
-
-	local OPTIONS_lowercase, CustomOptions_valid = {}, {}
-	for option_name in OPTIONS do
-		local option_name_lowercase = string.lower(option_name)
-		if OPTIONS_lowercase[option_name_lowercase] then
-			warn("DUPLICATE OPTION", option_name)
-		else
-			OPTIONS_lowercase[option_name_lowercase] = option_name
-		end
-	end
-	for option_alias, option_name in OPTIONS.OptionsAliases do
-		local option_name_lowercase = string.lower(option_alias)
-		if OPTIONS_lowercase[option_name_lowercase] then
-			warn("DUPLICATE ALIAS", option_alias)
-		else
-			OPTIONS_lowercase[option_name_lowercase] = option_name
-		end
-	end
-
-	do -- * Load Settings
-		local function construct_NilinstanceFix(Name, ClassName, Separate)
-			return function(instance, instancePropertyOverrides)
-				local Exists
-
-				if not Separate then
-					Exists = OPTIONS.NilInstancesFixes[Name]
-				end
-
-				local Fix
-
-				local DoesntExist = not Exists
-				if DoesntExist then
-					Fix = Instance.new(ClassName)
-					if not Separate then
-						OPTIONS.NilInstancesFixes[Name] = Fix
-					end
-					-- Fix.Name = Name
-
-					instancePropertyOverrides[Fix] =
-						{ __SaveSpecific = true, __Children = { instance }, Properties = { Name = Name } }
-				else
-					Fix = Exists
-					table.insert(instancePropertyOverrides[Fix].__Children, instance)
-				end
-
-				-- InstancesOverrides[instance].Parent = AnimationController
-				if DoesntExist then
-					return Fix
-				end
-			end
-		end
-
-		-- TODO: Merge BaseWrap & Attachment & AdPortal fix (put all under MeshPart container)
-		-- TODO?:
-		-- DebuggerWatch DebuggerWatch must be a child of ScriptDebugger
-		-- PluginAction Parent of PluginAction must be Plugin or PluginMenu that created it!
-		OPTIONS.NilInstancesFixes.Animator = construct_NilinstanceFix(
-			"Animator has to be placed under Humanoid or AnimationController",
-			"AnimationController"
-		)
-		OPTIONS.NilInstancesFixes.AdPortal = construct_NilinstanceFix("AdPortal must be parented to a Part", "Part")
-		OPTIONS.NilInstancesFixes.Attachment =
-			construct_NilinstanceFix("Attachments must be parented to a BasePart or another Attachment", "Part") -- * Bones inherit from Attachments
-		OPTIONS.NilInstancesFixes.BaseWrap =
-			construct_NilinstanceFix("BaseWrap must be parented to a MeshPart", "MeshPart")
-		OPTIONS.NilInstancesFixes.PackageLink =
-			construct_NilinstanceFix("Package already has a PackageLink", "Folder", true)
-
-		if CustomOptions2 and type(CustomOptions2) == "table" then
-			local tmp = CustomOptions
-			local Type = typeof(tmp)
-			CustomOptions = CustomOptions2
-			if Type == "Instance" then
-				CustomOptions.Object = tmp
-			elseif Type == "table" and typeof(tmp[1]) == "Instance" then
-				CustomOptions.ExtraInstances = tmp
-				OPTIONS.IsModel = true
-			end
-		end
-
-		local Type = typeof(CustomOptions)
-
-		if Type == "table" then
-			if typeof(CustomOptions[1]) == "Instance" then
-				OPTIONS.mode = "invalidmode"
-				OPTIONS.ExtraInstances = CustomOptions
-				OPTIONS.IsModel = true
-				CustomOptions = {}
-			else
-				for key, value in CustomOptions do
-					local option = OPTIONS_lowercase[string.lower(key)]
-
-					if option then
-						OPTIONS[option] = value
-						CustomOptions_valid[option] = true
-					end
-				end
-				local Decompile = CustomOptions.Decompile
-				if Decompile ~= nil then
-					OPTIONS.noscripts = not Decompile
-				end
-				local SavePlayerCharacters = CustomOptions.SavePlayerCharacters
-				if SavePlayerCharacters ~= nil then
-					OPTIONS.RemovePlayerCharacters = not SavePlayerCharacters
-				end
-				local RemovePlayers = CustomOptions.RemovePlayers
-				if RemovePlayers ~= nil then
-					OPTIONS.IsolatePlayers = not RemovePlayers
-				end
-			end
-		elseif Type == "Instance" then
-			OPTIONS.mode = "invalidmode"
-			OPTIONS.Object = CustomOptions
-			CustomOptions = {}
-		else
-			CustomOptions = {}
-		end
-	end
-
-	if not writefile and not OPTIONS.Callback then
-		-- appendfile could be used a fallback but what kind of exec has appendfile without writefile
-		local function coreCall(method, ...)
-			local StarterGui = service.StarterGui
-			method = StarterGui[method]
-			if not method then
-				return
-			end
-
-			for _ = 1, 10 do -- maxtries
-				local success, result = pcall(method, StarterGui, ...)
-				if success then
-					return result
-				end
-				task.wait(1)
-			end
-		end
-
-		local text = 'Function "writefile" is NOT available\nUse the Option "Callback" instead for now (check docs)'
-
-		coreCall("SetCore", "SendNotification", {
-			Title = "SAVEINSTANCE ERROR",
-			Text = text,
-			Duration = 15,
-			Icon = "rbxassetid://9072920609",
-		})
-		coreCall("SetCore", "SendNotification", {
-			Title = "SAVEINSTANCE ERROR",
-			Text = "Please ask your executor's developers to add writefile",
-			Duration = 15,
-			Icon = "rbxassetid://9072920609",
-		})
-
-		warn(text)
-
-		GLOBAL_ENV.USSI = nil
-		return
-	end
-
-	if OPTIONS.IgnoreDefaultPlayerScripts then
-		-- TODO This is a bad workaround, find a better automatic way
-		-- TODO Look into https://robloxapi.github.io/ref/class/LuaSourceContainer.html#member-isPlayerScript
-		local DecompileIgnore = OPTIONS.DecompileIgnore
-
-		local default_scripts = ArrayToDict({
-			ModuleScript = { "PlayerModule" },
-			LocalScript = {
-				"BubbleChat",
-				"ChatScript",
-				"PlayerScriptsLoader",
-				"RbxCharacterSounds",
-			},
-		}, true)
-
-		local function ignorePath(path)
-			if path then
-				for _, child in path:GetChildren() do
-					local class_match = default_scripts[child.ClassName]
-					if class_match then
-						local name_match = class_match[child.Name]
-						if name_match then
-							table.insert(DecompileIgnore, child)
-						end
-					end
-				end
-			end
-		end
-
-		ignorePath(service.StarterPlayer:FindFirstChildOfClass("StarterPlayerScripts"))
-
-		local LocalPlayer = service.Players.LocalPlayer
-		if LocalPlayer then
-			ignorePath(LocalPlayer:FindFirstChildOfClass("PlayerScripts"))
-		end
-	end
-
-	local InstancesOverrides = {}
-
-	local DecompileIgnore, IgnoreList, IgnoreProperties, NotCreatableFixes =
-		ArrayToDict(OPTIONS.DecompileIgnore, true),
-	ArrayToDict(OPTIONS.IgnoreList, true),
-	ArrayToDict(OPTIONS.IgnoreProperties),
-	ArrayToDict(OPTIONS.NotCreatableFixes, true, "Folder")
-
-	local __DEBUG_MODE = OPTIONS.__DEBUG_MODE
-
-	if __DEBUG_MODE and type(__DEBUG_MODE) ~= "function" then
-		__DEBUG_MODE = warn
-	end
-
-	local FilePath = OPTIONS.FilePath
-	local SaveCacheInterval = OPTIONS.SaveCacheInterval
-	local ToSaveInstance = OPTIONS.Object
-	local IsModel = OPTIONS.IsModel
-
-	if ToSaveInstance and CustomOptions.IsModel == nil then
-		IsModel = true
-	end
-
-	local IgnoreDefaultProperties = OPTIONS.IgnoreDefaultProperties
-	local IgnoreNotArchivable = not OPTIONS.IgnoreNotArchivable
-	local IgnorePropertiesOfNotScriptsOnScriptsMode = OPTIONS.IgnorePropertiesOfNotScriptsOnScriptsMode
-
-	local old_gethiddenproperty
-	if OPTIONS.IgnoreSpecialProperties and gethiddenproperty then
-		old_gethiddenproperty = gethiddenproperty
-		gethiddenproperty = nil
-	end
-
-	local SaveNotCreatable = OPTIONS.SaveNotCreatable
-	local TreatUnionsAsParts = OPTIONS.TreatUnionsAsParts
-
-	local DecompileJobless = OPTIONS.DecompileJobless
-	if DecompileJobless then
-		OPTIONS.scriptcache = true
-	end
-	local ScriptCache = OPTIONS.scriptcache and getscriptbytecode
-
-	local Timeout = OPTIONS.timeout
-
-	local IgnoreSharedStrings = OPTIONS.IgnoreSharedStrings
-	local SharedStringOverwrite = OPTIONS.SharedStringOverwrite
-
-	local ldeccache = GLOBAL_ENV.scriptcache
-
-	local DecompileIgnoring, ToSaveList, ldecompile, placename, elapse_t, SaveNotCreatableWillBeEnabled, RecoveredScripts
-
-	if OPTIONS.ReadMe then
-		RecoveredScripts = {}
-	end
-
-	if ScriptCache and not ldeccache then
-		ldeccache = {}
-		GLOBAL_ENV.scriptcache = ldeccache
-	end
-
-	if ToSaveInstance == game then
-		OPTIONS.mode = "full"
-		ToSaveInstance = nil
-		IsModel = nil
-	end
-
-	local function isLuaSourceContainer(instance)
-		return instance:IsA("LuaSourceContainer")
-	end
-
-	do
-		local mode = string.lower(OPTIONS.mode)
-		local tmp = table.clone(OPTIONS.ExtraInstances)
-
-		local PlaceName = game.PlaceId
-
-		pcall(function()
-			PlaceName ..= " " .. service.MarketplaceService:GetProductInfo(PlaceName).Name .. "_" .. os.date("%m_%d_%Y_%I_%M%p"):lower()
-		end)
-
-		local function sanitizeFileName(str)
-			return string.sub(string.gsub(string.gsub(string.gsub(str, "[^%w _]", ""), " +", " "), " +$", ""), 1, 240)
-		end
-
-		if ToSaveInstance then
-			if mode == "optimized" then -- ! NOT supported with Model file mode
-				mode = "full"
-			end
-
-			for _, key in
-				{
-					"IsolateLocalPlayer",
-					"IsolateLocalPlayerCharacter",
-					"IsolatePlayers",
-					"IsolateStarterPlayer",
-					"NilInstances",
-				}
-			do
-				if CustomOptions_valid[key] == nil then
-					OPTIONS[key] = false
-				end
-			end
-		end
-
-		local filetype = IsModel and ".rbxmx" or ".rbxlx"
-
-		if FilePath then
-			placename = FilePath
-		elseif IsModel then
-			placename =
-				sanitizeFileName("ViciousVault - model " .. PlaceName .. " " .. (ToSaveInstance or tmp[1] or game):GetFullName())
-		else
-			placename = sanitizeFileName("ViciousVault - place " .. PlaceName)
-		end
-
-		if OPTIONS.AvoidFileOverwrite and isfile then
-			local counter = 0
-			local temp = placename
-
-			while isfile(temp .. filetype) do
-				counter += 1
-				temp = placename .. "(" .. counter .. ")"
-			end
-
-			placename = temp .. filetype
-		else
-			placename = placename .. filetype
-		end
-
-		if GLOBAL_ENV[placename] then
-			-- warn("UniversalSynSaveInstance is already saving to this file")
-			return
-		end
-
-		GLOBAL_ENV[placename] = true
-		GLOBAL_ENV.USSI = nil
-
-		if mode ~= "scripts" then
-			IgnorePropertiesOfNotScriptsOnScriptsMode = nil
-		end
-
-		local TempRoot = ToSaveInstance or game
-
-		if mode == "full" then
-			if not ToSaveInstance then
-				local Children = TempRoot:GetChildren()
-				if 0 < #Children then
-					local tmp_dict = ArrayToDict(tmp)
-					for _, child in Children do
-						if not tmp_dict[child] then
-							table.insert(tmp, child)
-						end
-					end
-				end
-			end
-		elseif mode == "optimized" then -- ! Incompatible with .rbxmx (Model file) mode
-			-- if IsolatePlayers then
-			-- 	table.insert(_list_0, "Players")
-			-- end
-			local tmp_dict = ArrayToDict(tmp)
-
-			for _, serviceName in
-				{
-					"Workspace",
-					"Players",
-					"Lighting",
-					"MaterialService",
-					"ReplicatedFirst",
-					"ReplicatedStorage",
-
-					"ServerScriptService", -- LoadStringEnabled property (doesn't replicate); Just in case
-					"ServerStorage", -- Just in case
-
-					"StarterGui",
-					"StarterPack",
-					"StarterPlayer",
-					"Teams",
-					"SoundService",
-					"Chat",
-					"TextChatService",
-
-					"LocalizationService", -- For LocalizationTables
-					-- "InsertService",
-					"JointsService",
-
-					-- "TestService",
-					-- "VoiceChatService",
-				}
-			do
-				local _service = game:FindService(serviceName)
-				if _service and not tmp_dict[_service] then
-					table.insert(tmp, _service)
-				end
-			end
-		elseif mode == "scripts" then
-			-- TODO: Only save paths that lead to scripts (nothing else)
-			-- Currently saves paths along with children of each tree
-			local unique = {}
-			for _, instance in TempRoot:GetDescendants() do
-				if isLuaSourceContainer(instance) then
-					local Parent = instance.Parent
-					while Parent and Parent ~= TempRoot do
-						instance = instance.Parent
-						Parent = instance.Parent
-					end
-					if Parent then
-						unique[instance] = true
-					end
-				end
-			end
-			for instance in unique do
-				table.insert(tmp, instance)
-			end
-		end
-
-		ToSaveList = tmp
-
-		if ToSaveInstance then
-			table.insert(ToSaveList, 1, ToSaveInstance)
-		end
-	end
-
-	local IsolateLocalPlayer = OPTIONS.IsolateLocalPlayer
-	local IsolateLocalPlayerCharacter = OPTIONS.IsolateLocalPlayerCharacter
-	local IsolatePlayers = OPTIONS.IsolatePlayers
-	local IsolateStarterPlayer = OPTIONS.IsolateStarterPlayer
-	local NilInstances = OPTIONS.NilInstances
-
-	if NilInstances and enablenilinstances then -- ? Solara fix
-		enablenilinstances()
-	end
-	local function get_size_format()
-		local Size
-
-		-- local totalsize = #totalstr
-
-		for i, unit in
-			{
-				"B",
-				"KB",
-				"MB",
-				"GB",
-				"TB",
-			}
-		do
-			if totalsize < 0x400 ^ i then
-				Size = math.floor(totalsize / (0x400 ^ (i - 1)) * 10) / 10 .. " " .. unit
-				break
-			end
-		end
-
-		return Size
-	end
-
-	local RunService = service.RunService
-	local function wait_for_render()
-		RunService.RenderStepped:Wait()
-	end
-
-	local Loading
-	local function run_with_loading(text, keepStatus, waitForRender, taskFunction, ...)
-		local previousStatus
-
-		if StatusText then
-			if keepStatus then
-				previousStatus = StatusText.Text
-			end
-			Loading = task.spawn(function()
-				local spinner_count = 0
-				local chars = { "|", "/", "—", "\\" }
-				local chars_size = #chars
-
-				local function getLoadingText()
-					spinner_count += 1
-
-					if chars_size < spinner_count then
-						spinner_count = 1
-					end
-
-					return chars[spinner_count]
-				end
-
-				text ..= " "
-
-				while true do
-					StatusText.Text = text .. getLoadingText()
-					task.wait(0.25)
-				end
-			end)
-			if waitForRender then
-				wait_for_render()
-			end
-		end
-
-		local result = { taskFunction(...) }
-
-		if Loading then
-			task.cancel(Loading)
-			Loading = nil
-			if previousStatus then
-				StatusText.Text = previousStatus
-			end
-		end
-
-		return unpack(result)
-	end
-
-	local function construct_TimeoutHandler(timeout, f, timeout_ret)
-		return timeout < 0 and function(script)
-			return pcall(f, script)
-		end or function(script) -- TODO Ideally use ... (vararg) instead of `script` in case this is reused for something other than `decompile` & `getscriptbytecode`
-			local thread = coroutine.running()
-			local timeoutThread, isCancelled
-
-			timeoutThread = task.delay(timeout, function()
-				isCancelled = true -- TODO task.cancel
-				coroutine.resume(thread, nil, timeout_ret)
-			end)
-
-			task.spawn(function()
-				local ok, result = pcall(f, script)
-
-				if isCancelled then
-					return
-				end
-
-				task.cancel(timeoutThread)
-
-				while coroutine.status(thread) ~= "suspended" do
-					task.wait()
-				end
-
-				coroutine.resume(thread, ok, result)
-			end)
-
-			return coroutine.yield()
-		end
-	end
-
-	local getbytecode
-	if getscriptbytecode then
-		getbytecode = construct_TimeoutHandler(3, getscriptbytecode) -- ? Solara fix
-	end
-
-	local SaveBytecode
-	if OPTIONS.SaveBytecode and getscriptbytecode then
-		SaveBytecode = function(script)
-			local s, bytecode = getbytecode(script)
-
-			if s and bytecode and bytecode ~= "" then
-				return "-- Bytecode (Base64):\n-- " .. base64encode(bytecode) .. "\n\n"
-			end
-		end
-	end
-
-	do
-		local Decompiler = decompile
-
-		if OPTIONS.noscripts then
-			ldecompile = function()
-				return "-- Decompiling is disabled"
-			end
-		elseif Decompiler then
-			local decomp = construct_TimeoutHandler(Timeout, Decompiler, "Decompiler timed out")
-
-			ldecompile = function(script)
-				-- local name = scr.ClassName .. scr.Name
-				local bytecode
-				if ScriptCache then
-					local s
-					s, bytecode = getbytecode(script)
-					local cached
-
-					if s then
-						if not bytecode or bytecode == "" then
-							return "-- The Script is Empty"
-						end
-						cached = ldeccache[bytecode]
-					else
-						bytecode = nil
-					end
-
-					if cached then
-						if __DEBUG_MODE then
-							__DEBUG_MODE("Found in Cache", script:GetFullName())
-						end
-						return cached
-					end
-				else
-					if DecompileJobless then
-						return "-- Not found in already decompiled ScriptCache"
-					end
-
-					task.wait() -- TODO Maybe remove?
-				end
-
-				local ok, result
-				if OPTIONS.usekonstantdecompiler then
-					ok, result = pcall(function()
-						return konstantdecompiler.decompile(bytecode)
-					end)
-				else
-                 if ScriptsDone then
-					ScriptsDone += 1
-				end
-				local progress = ScriptsDone and TotalScripts
-					and (" [" .. ScriptsDone .. "/" .. TotalScripts .. "]") or ""
-				ok, result = run_with_loading("Decompiling " .. script.Name .. progress, true, nil, decomp, script)
-				end
-				
-				if not result then
-					ok, result = false, "Empty Output"
-				end
-
-				local output
-				if ok then
-					result = string.gsub(result, "\0", "\\0") -- ? Some decompilers sadly output \0 which prevents files from opening
-					output = result
-				else
-					output = "--[[ Failed to decompile. Reason:\n" .. (result or "") .. "\n]]"
-				end
-
-				if ScriptCache and bytecode then -- TODO there might(?) be an edgecase where it manages to decompile (built-in) even though getscriptbytecode failed, and the output won't get cached
-					ldeccache[bytecode] = output -- ? Should we cache even if it timed out?
-					if __DEBUG_MODE then
-						__DEBUG_MODE("Cached", script:GetFullName())
-					end
-				end
-
-				return output
-			end
-		else
-			ldecompile = function()
-				return "-- Your Executor does NOT have a Decompiler"
-			end
-		end
-	end
-
-	local function GetLocalPlayer()
-		return service.Players.LocalPlayer
-			or service.Players:GetPropertyChangedSignal("LocalPlayer"):Wait()
-			or service.Players.LocalPlayer
-	end
-
-	local function filterLinkedSource(str)
-		local o, r = pcall(service.HttpService.JSONDecode, service.HttpService, str)
-		if o and r.errors then
-			return
-		end
-		return true
-	end
-
-	local function replaceClassName(instance, InstanceName, ClassName)
-		local InstanceOverride
-		if InstanceName ~= ClassName then -- TODO Compare against default instance instead (TouchTransmitter is called TouchInterest by default)
-			InstanceOverride = InstancesOverrides[instance]
-			if not InstanceOverride then
-				InstanceOverride = { Properties = { Name = "[" .. ClassName .. "] " .. InstanceName } }
-				InstancesOverrides[instance] = InstanceOverride
-			end
-		end
-		return InstanceOverride
-	end
-
-	local function filterPropVal(result, propertyName, category) -- ? raw == nil thanks to SerializedDefaultAttributes; "can't get value" - due to WriteOnly tag;  "Invalid value for enum " - "StreamingPauseMode" (old games probably) Roexec
-		return result == nil
-			or result == "can't get value"
-			or type(result) == "string"
-			and (category == "Enum" or string_find(result, "Unable to get property " .. propertyName))
-	end
-
-	local __BREAK = "__BREAK" .. service.HttpService:GenerateGUID(false)
-
-	local function ReadProperty(instance, property, propertyName, special, category, optional)
-		local raw = __BREAK
-
-		local InstanceOverride = InstancesOverrides[instance]
-		if InstanceOverride then
-			local PropertiesOverride = InstanceOverride.Properties
-			if PropertiesOverride then
-				local PropertyOverride = PropertiesOverride[propertyName]
-				if PropertyOverride ~= nil then
-					return PropertyOverride
-				end
-			end
-		end
-
-		local CanRead = property.CanRead
-
-		if CanRead == false then -- * Skips because we've checked this property before
-			return __BREAK
-		end
-
-		if special then
-			if gethiddenproperty then
-				local ok, result = pcall(gethiddenproperty, instance, propertyName)
-
-				if ok then
-					raw = result
-				end
-
-				if filterPropVal(raw, propertyName, category) then
-					-- * Skip next time we encounter this too perhaps (unless there's a chance for it to be readable on other instance, somehow)
-
-					if result ~= nil or not optional then
-						if __DEBUG_MODE then
-							__DEBUG_MODE("Filtered", propertyName)
-						end
-						-- Property.Special = false
-						property.CanRead = false
-					end
-
-					return __BREAK -- ? We skip it because even if we use "" it will just reset to default in most cases, unless it's a string tag for example (same as not being defined)
-				end
-			end
-		else
-			if CanRead then
-				raw = instance[propertyName]
-			else -- Assuming CanRead == nil (untested)
-				local ok, result = pcall(index, instance, propertyName)
-
-				if ok then
-					raw = result
-				elseif gethiddenproperty then -- ! Be careful with this 'and gethiddenproperty' logic
-					ok, result = pcall(gethiddenproperty, instance, propertyName)
-
-					if ok then
-						raw = result
-
-						property.Special = true
-					end
-				end
-
-				property.CanRead = ok
-
-				if not ok or filterPropVal(raw, propertyName, category) then
-					return __BREAK
-				end
-			end
-		end
-
-		return raw
-	end
-
-	local function ReturnItem(className, instance)
-		return '<Item class="' .. className .. '" referent="' .. GetRef(instance) .. '"><Properties>' -- TODO: Ideally this shouldn't return <Properties> as well as the line below to close it IF  IgnorePropertiesOfNotScriptsOnScriptsMode is Enabled OR If all properties are default (reduces file size by at least 1.4%)
-	end
-
-	local function ReturnProperty(tag, propertyName, value)
-		return "<" .. tag .. ' name="' .. propertyName .. '">' .. value .. "</" .. tag .. ">"
-	end
-
-	local function ReturnValueAndTag(raw, valueType, descriptor)
-		local value, tag = (descriptor or XML_Descriptors[valueType])(raw)
-
-		return value, tag or valueType
-	end
-
-	local function InheritsFix(fixes, className, instance)
-		local Fix = fixes[className]
-		if Fix then
-			return Fix
-		elseif Fix == nil then
-			for class_name, fix in fixes do
-				if instance:IsA(class_name) then
-					return fix
-				end
-			end
-		end
-	end
-
-	local function GetInheritedProps(className)
-		local cached = inherited_properties[className]
-		if cached then
-			return cached
-		end
-
-		local prop_list = {}
-		local layer = ClassList[className]
-		while layer do
-			local layer_props = layer.Properties
-			table.move(layer_props, 1, #layer_props, #prop_list + 1, prop_list)
-
-			-- for _, prop in layer.Properties do
-			-- 	prop_list[prop_count] = prop -- ? table.clone is needed for case where .Default is modified
-			-- 	prop_count += 1
-			-- end
-
-			layer = ClassList[layer.Superclass]
-		end
-		inherited_properties[className] = prop_list
-		return prop_list
-	end
-
-	local CHUNK_LIMIT = 200 * 1024 * 1024 -- string length overflow prevention
-	local function save_cache(final)
-		local savestr = table.concat(savebuffer)
-		currentstr ..= savestr -- TODO: Causes "not enough memory" error on some exec
-
-		-- writefile(placename, totalstr)
-		-- appendfile(placename, savestr) -- * supposedly causes uneven amount of Tags (e.g. <Item> must be closed with </Item> but sometimes there's more of one than the other). While being under load, the function produces unexpected output?
-		local savestr_len = #savestr
-		totalsize += savestr_len
-		currentsize += savestr_len
-
-		table.clear(savebuffer)
-		savebuffer_size = 1
-
-		if CHUNK_LIMIT < currentsize or final then
-			table.insert(chunks, { size = currentsize, str = currentstr })
-			currentstr, currentsize = "", 0
-		end
-
-		if StatusText then
-			StatusText.Text = "Saving.. Size: " .. get_size_format()
-		end
-		-- ? Needed for at least 1fps (status text)
-		-- task.wait()
-		wait_for_render()
-	end
-
-	local function save_specific(className, properties)
-		local Ref = Instance.new(className) -- ! Assuming anything passed here is Creatable
-		local Item = ReturnItem(Ref.ClassName, Ref)
-
-		for propertyName, val in properties do
-			local whitelisted, value, tag
-
-			-- TODO: Improve all sort of overrides & exceptions in the code (code below is awful)
-			if "Source" == propertyName then
-				tag = "ProtectedString"
-				value = XML_Descriptors.__PROTECTEDSTRING(val)
-				whitelisted = true
-			elseif "Name" == propertyName then
-				whitelisted = true
-				value, tag = ReturnValueAndTag(val, "string") -- * Doubt ValueType will change
-			end
-
-			if whitelisted then
-				Item ..= ReturnProperty(tag, propertyName, value)
-			end
-		end
-		Item ..= "</Properties>"
-		return Item
-	end
-
-	local function save_hierarchy(hierarchy)
-		for _, instance in hierarchy do
-			local InstanceOverride, ClassTagOverride, ClassNameOverride
-
-			if not InstanceOverride then
-				InstanceOverride = InstancesOverrides[instance]
-				if InstanceOverride then
-					ClassTagOverride = InstanceOverride.__ClassName
-				end
-			end
-			local ClassName = instance.ClassName
-
-			local InstanceName = instance.Name
-			local SkipEntirely
-
-			if not ClassTagOverride then -- ! Assuming anything that has __ClassName comes from save_extra
-				if IgnoreNotArchivable and not instance.Archivable then
-					continue
-				end
-
-				SkipEntirely = IgnoreList[instance]
-				if SkipEntirely then
-					continue
-				end
-
-				do
-					local OnIgnoredList = IgnoreList[ClassName]
-					if OnIgnoredList and (OnIgnoredList == true or OnIgnoredList[InstanceName]) then
-						continue
-					end
-				end
-
-				if not DecompileIgnoring then
-					DecompileIgnoring = DecompileIgnore[instance]
-
-					if DecompileIgnoring == nil then
-						local DecompileIgnored = DecompileIgnore[ClassName]
-						if DecompileIgnored then
-							DecompileIgnoring = DecompileIgnored == true or DecompileIgnored[InstanceName]
-						end
-					end
-
-					if DecompileIgnoring then
-						DecompileIgnoring = instance
-					elseif DecompileIgnoring == false then
-						DecompileIgnoring = 1 -- Ignore one instance
-					end
-				end
-
-				do
-					local Fix = NotCreatableFixes[ClassName]
-
-					if Fix then
-						if SaveNotCreatable then
-							ClassName, InstanceOverride = Fix, replaceClassName(instance, InstanceName, ClassName)
-						else
-							continue -- They won't show up in Studio anyway (Enable SaveNotCreatable if you wish to bypass this)
-						end
-					else -- ! Assuming nothing that is a PartOperation or inherits from it is in NotCreatableFixes
-						if TreatUnionsAsParts and instance:IsA("PartOperation") then
-							ClassName, InstanceOverride = "Part", replaceClassName(instance, InstanceName, ClassName)
-							ClassNameOverride = "BasePart" -- * Mutual Superclass for PartOperation and Part; For properties only
-						elseif not ClassList[ClassName] then -- ? API Dump is outdated then
-							if __DEBUG_MODE then
-								__DEBUG_MODE("Class not Found", ClassName)
-							end
-
-							ClassTagOverride = ClassName -- ? To at least retain .ClassName unlike the rest of the class-specific properties
-							ClassName = "Folder" -- ? replaceClassName is not needed because of the ClassTagOverride
-						end
-					end
-				end
-			end
-			-- ? The reason we only save .Name (and few other props in save_specific) is because
-			-- ? we can be sure this is a custom container (ex. NilInstancesFixes)
-			-- ? However, in case of NotCreatableFixes, the Instance might have Tags, Attributes etc. that can potentially be saved (even though it's a Folder)
-			if InstanceOverride and InstanceOverride.__SaveSpecific then
-				savebuffer[savebuffer_size] = save_specific(ClassName, InstanceOverride.Properties) -- ! Assuming anything that has __SaveSpecific will have .Properties
-				savebuffer_size += 1
-			else
-				-- local Properties =
-				savebuffer[savebuffer_size] = ReturnItem(ClassTagOverride or ClassName, instance) -- TODO: Ideally this shouldn't return <Properties> as well as the line below to close it IF  IgnorePropertiesOfNotScriptsOnScriptsMode is ENABLED
-				savebuffer_size += 1
-				if not (IgnorePropertiesOfNotScriptsOnScriptsMode and not isLuaSourceContainer(instance)) then
-					local default_instance, new_def_inst
-
-					if IgnoreDefaultProperties then
-						default_instance = default_instances[ClassName]
-						if not default_instance then
-							local Class = ClassList[ClassName]
-							if not Class.NotCreatable then -- __api_dump_class_not_creatable__ also indicates this
-								-- NotCreatableFixes are exceptions to the check above meaning if we don't keep the NotCreatableFixes updated then Instance.new below might start erroring in the future potentially; HOWEVER IsPropertyModified solves this issue and no updates are really needed as NotCreatableFixes is up-to-date as of VERSION-HERE (which is when IPM gets enabled)
-								local ok, result = pcall(Instance.new, ClassName) -- ! pcall is needed for level 3 execs (for example TestService); EXCEPTION NOTED ABOVE (irrelevant)
-
-								if ok then
-									new_def_inst = result
-
-									default_instance = {}
-
-									default_instances[ClassName] = default_instance
-								else
-									Class.NotCreatable = true
-									if __DEBUG_MODE then
-										__DEBUG_MODE("Failed to create default Instance", ClassName, result)
-									end
-								end
-							elseif __DEBUG_MODE then
-								__DEBUG_MODE("Unable to create default Instance (NotCreatable)", ClassName)
-							end
-						end
-					end
-
-					for _, Property in GetInheritedProps(ClassNameOverride or ClassName) do
-						local PropertyName = Property.Name
-
-						if IgnoreProperties[PropertyName] then
-							continue
-						end
-
-						local ValueType = Property.ValueType
-
-						if IgnoreSharedStrings and ValueType == "SharedString" then -- ? More info in Options
-							continue
-						end
-
-						local Special, Category, Optional = Property.Special, Property.Category, Property.Optional
-
-						local raw = ReadProperty(instance, Property, PropertyName, Special, Category, Optional)
-
-						if raw == __BREAK then -- ! Assuming __BREAK is always returned when there's a failure to read a property
-							local GHPFFailed, Fallback = Property.GHPFFailed, Property.Fallback
-							if GHPFFailed and not Fallback then
-								continue
-							end
-
-							if not GHPFFailed then
-								local ok, result = pcall(gethiddenproperty_fallback, instance, PropertyName) -- * This helps in reading: Vector3int16, OptionalCoordinateFrame DataTypes. It also acts as an almost entire fallback for gethiddenproperty in case it is missing
-								if result == nil and not Optional then
-									ok = nil
-								end
-
-								if ok then
-									raw = result
-								else
-									GHPFFailed = true
-									Property.GHPFFailed = GHPFFailed
-								end
-							end
-
-							if GHPFFailed and Fallback then
-								local ok, result = pcall(Fallback, instance)
-
-								if ok then
-									raw = result
-								else
-									Property.Fallback = nil -- Low level execs might fail due to lack of some Capabilities
-									if __DEBUG_MODE then
-										__DEBUG_MODE("Fix Failed", PropertyName, result)
-									end
-									continue
-								end
-							end
-
-							if raw == __BREAK then
-								continue
-							end
-						end
-
-						if SharedStringOverwrite and ValueType == "BinaryString" then -- TODO: Convert this to table if more types are added
-							ValueType = "SharedString"
-						end
-
-						-- Special = Property.Special -- ? Read TODO below (must be updated if it's used frequently afterwards)
-
-						if
-							default_instance
-							and Property.CanRead
-							and not Property.Special -- TODO: .Special is checked more than once (because it might be updated during ReadProperty)
-							and not (PropertyName == "Source" and isLuaSourceContainer(instance))
-						then -- ? Could be not just "Source" in the future
-							if new_def_inst then
-								default_instance[PropertyName] = index(new_def_inst, PropertyName)
-							end
-							if default_instance[PropertyName] == raw then
-								continue
-							end
-						end
-
-						-- Serialization start
-
-						local tag, value
-						if Category == "Class" then
-							tag = "Ref"
-							if raw then
-								if SaveNotCreatableWillBeEnabled then
-									local Fix = NotCreatableFixes[raw.ClassName]
-									if
-										Fix
-										and (
-											PropertyName == "PlayerToHideFrom"
-												or ValueType ~= "Instance" and ValueType ~= Fix
-										)
-									then
-										-- * To avoid errors
-										continue
-									end
-								end
-
-								value = GetRef(raw)
-							else
-								value = "null"
-							end
-						elseif Category == "Enum" then -- ! We do this order (Enums before Descriptors) specifically because Font Enum might get a Font Descriptor despite having Enum Category, unlike Font DataType which that Descriptor is meant for
-							value, tag = XML_Descriptors.EnumItem(raw)
-						else
-							local Descriptor = XML_Descriptors[ValueType]
-
-							if Descriptor then
-								value, tag = ReturnValueAndTag(raw, ValueType, Descriptor)
-							elseif "ProtectedString" == ValueType then -- TODO: Try fitting this inside Descriptors
-								tag = ValueType
-
-								if PropertyName == "Source" then
-									if DecompileIgnoring then -- ? Should this really prevent extraction of the original source if present ?
-										if DecompileIgnoring == 1 then
-											DecompileIgnoring = nil
-										end
-										value = "-- Ignored"
-									else
-										local should_decompile = true
-										local LinkedSource
-										local LinkedSource_Url = instance.LinkedSource -- ! Assuming every Class that has ProtectedString Source property also has a LinkedSource property
-										local hasLinkedSource = LinkedSource_Url ~= ""
-										local LinkedSource_type
-										if hasLinkedSource then
-											local Path = instance:GetFullName()
-											if RecoveredScripts then
-												table.insert(RecoveredScripts, Path)
-											end
-
-											LinkedSource = string.match(LinkedSource_Url, "%w+$") -- TODO: No sure if this pattern matches all possible cases. Example is: 'rbxassetid://0&hash=cd73dd2fe5e5013137231c227da3167e'
-											if LinkedSource then
-												if ScriptCache then
-													local cached = ldeccache[LinkedSource]
-
-													if cached then
-														value = cached
-														should_decompile = nil
-													end
-												end
-												if should_decompile then
-													if DecompileJobless then
-														value = "-- Not found in LinkedSource ScriptCache"
-														should_decompile = nil
-													end
-
-													LinkedSource_type = string.find(LinkedSource, "%a") and "hash"
-														or "id"
-
-													local asset = LinkedSource_type .. "=" .. LinkedSource
-
-													local ok, source = pcall(function()
-														-- Credits @halffalse
-														return game:HttpGet(
-															"https://assetdelivery.roproxy.com/v1/asset/?" .. asset
-														)
-													end)
-
-													if ok and filterLinkedSource(source) then
-														if ScriptCache then
-															ldeccache[LinkedSource] = source
-														end
-
-														value = source
-
-														should_decompile = nil
-													end
-												end
-											else --if __DEBUG_MODE then -- * We print this anyway because very important
-												warn(
-													"FAILED TO EXTRACT ORIGINAL SCRIPT SOURCE (OPEN A GITHUB ISSUE): ",
-													instance:GetFullName(),
-													LinkedSource_Url
-												)
-											end
-										end
-
-										if should_decompile then
-											local isLocalScript = instance:IsA("LocalScript")
-											if
-												isLocalScript and instance.RunContext == Enum.RunContext.Server
-												or not isLocalScript
-												and instance:IsA("Script")
-												and instance.RunContext ~= Enum.RunContext.Client
-											then
-												value = "-- [FilteringEnabled] Server Scripts are IMPOSSIBLE to save" -- TODO: Could be not just server scripts in the future
-											else
-												if OPTIONS.usekonstantdecompiler then
-													value = konstantdecompiler.decompile(instance)
-												else
-													value = ldecompile(instance)
-												end
-												if SaveBytecode then
-													local output = SaveBytecode(instance)
-													if output then
-														value = output .. value
-													end
-												end
-											end
-										end
-
-										value = "-- Decompiled by ViciousVault (Join to Copy Games) https://discord.com/invite/C3ekgzuxFy\n\n"
-											.. (hasLinkedSource and "-- Original Source: https://assetdelivery.roblox.com/v1/asset/?" .. (LinkedSource_type or "id") .. "=" .. (LinkedSource or LinkedSource_Url) .. "\n\n" or "")
-											.. value
-									end
-								end
-								value = XML_Descriptors.__PROTECTEDSTRING(value)
-							else
-								--OptionalCoordinateFrame and so on, we make it dynamic
-
-								if Optional then
-									Descriptor = XML_Descriptors[Optional]
-
-									if Descriptor then
-										if raw == nil then
-											-- * It can be empty, because it's optional
-											-- ? Though why even save it if it's empty considering it's optional
-											continue
-											-- value, tag = "", ValueType
-										else
-											value, tag = ReturnValueAndTag(raw, ValueType, Descriptor)
-										end
-									end
-								end
-							end
-						end
-
-						if tag then
-							savebuffer[savebuffer_size] = ReturnProperty(tag, PropertyName, value)
-							savebuffer_size += 1
-						else --if __DEBUG_MODE then -- * We print this anyway because very important
-							warn("UNSUPPORTED TYPE (OPEN A GITHUB ISSUE): ", ValueType, ClassName, PropertyName)
-						end
-					end
-				end
-				savebuffer[savebuffer_size] = "</Properties>"
-				savebuffer_size += 1
-
-				if SaveCacheInterval < savebuffer_size then
-					save_cache()
-				end
-			end
-
-			if SkipEntirely ~= false then -- ? We save instance without it's descendants in this case (== false)
-				local Children = InstanceOverride and InstanceOverride.__Children or instance:GetChildren()
-
-				if #Children ~= 0 then
-					save_hierarchy(Children)
-				end
-			end
-
-			if DecompileIgnoring and DecompileIgnoring == instance then
-				DecompileIgnoring = nil
-			end
-
-			savebuffer[savebuffer_size] = "</Item>"
-			savebuffer_size += 1
-		end
-	end
-
-	local function save_extra(name, instanceOrTable, saveProps, customClassName, source)
-		if not customClassName then
-			customClassName = "Folder"
-		end
-
-		local properties = { Name = name, Source = source }
-		local hierarchy
-
-		if instanceOrTable then
-			if type(instanceOrTable) == "table" then
-				hierarchy = instanceOrTable
-			else
-				hierarchy = instanceOrTable:GetChildren()
-				if saveProps then
-					-- IgnoreList[instanceOrTable] = nil
-					-- IgnoreNotArchivable = false
-
-					InstancesOverrides[instanceOrTable] = {
-						__ClassName = customClassName, -- ! Assuming any class that contains ProtectedString is never passed, because it expects bytecode, not normal code
-						__Children = hierarchy,
-						Properties = properties,
-					}
-
-					save_hierarchy({ instanceOrTable })
-				end
-			end
-		end
-
-		if not saveProps then
-			savebuffer[savebuffer_size] = save_specific(customClassName, properties)
-			savebuffer_size += 1
-			if hierarchy then
-				save_hierarchy(hierarchy)
-			end
-			savebuffer[savebuffer_size] = "</Item>"
-			savebuffer_size += 1
-		end
-	end
-
-	local function save_game()
-		do
-			if IsModel then
-				--[[
-			-- ? Roblox encodes the following additional attributes. These are not required. Moreover, any defined schemas are ignored, and not required for a file to be valid: xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd"
-			Also http can be converted to https but not sure if Roblox cares
-			-- ? <External>null</External><External>nil</External>  - <External> is a legacy concept that is no longer used.
-		]]
-				header ..= '<Meta name="ExplicitAutoJoints">true</Meta>'
-			end
-			if writefile and not OPTIONS.Callback then
-				writefile(placename, header) -- TODO This is sort of useless if writefile will be used at the end (like if AlternativeWritefile and Callback are unused)
-			end
-		end
-
-		-- TODO Find a better solution for this
-		SaveNotCreatableWillBeEnabled = SaveNotCreatable
-			or (IsolateLocalPlayer or IsolateLocalPlayerCharacter) and IsolateLocalPlayer
-			or IsolatePlayers
-			or NilInstances and global_container.getnilinstances -- ! Make sure this accurately reflects everything below
-
-
-        local WatermarkGuiInstance
-		if OPTIONS.WatermarkGui then
-         local DELETEME = Instance.new("ScreenGui")
-         local Background = Instance.new("Frame")
-         local BackgroundText = Instance.new("TextLabel")
-         local UIAspectRatioConstraint = Instance.new("UIAspectRatioConstraint")
-         local UITextSizeConstraint = Instance.new("UITextSizeConstraint")
-         local TextLabel = Instance.new("TextLabel")
-         local UIGradient = Instance.new("UIGradient")
-         local TextLabel_2 = Instance.new("TextLabel")
-         local TextLabel_3 = Instance.new("TextLabel")
-         local UIGradient_2 = Instance.new("UIGradient")
-         
-         --Properties:
-         
-         DELETEME.Name = "DELETE ME"
-         DELETEME.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
-         DELETEME.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-         DELETEME.DisplayOrder = 100000000
-         
-         Background.Name = "Background"
-         Background.Parent = DELETEME
-         Background.AnchorPoint = Vector2.new(0.5, 0.5)
-         Background.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-         Background.BackgroundTransparency = 0.150
-         Background.BorderColor3 = Color3.fromRGB(0, 0, 0)
-         Background.BorderSizePixel = 0
-         Background.Position = UDim2.new(0.5, 0, 0.5, 0)
-         Background.Size = UDim2.new(1, 0, 1, 0)
-         Background.ZIndex = 10000
-         
-         BackgroundText.Name = "BackgroundText"
-         BackgroundText.Parent = Background
-         BackgroundText.AnchorPoint = Vector2.new(0.5, 0.5)
-         BackgroundText.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-         BackgroundText.BackgroundTransparency = 1.000
-         BackgroundText.BorderColor3 = Color3.fromRGB(0, 0, 0)
-         BackgroundText.BorderSizePixel = 0
-         BackgroundText.Position = UDim2.new(0.5, 0, 0.5, 0)
-         BackgroundText.Size = UDim2.new(1.29999995, 0, 1.29999995, 0)
-         BackgroundText.Font = Enum.Font.Fondamento
-         BackgroundText.Text = "ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault ViciousVault "
-         BackgroundText.TextColor3 = Color3.fromRGB(255, 255, 255)
-         BackgroundText.TextScaled = true
-         BackgroundText.TextSize = 14.000
-         BackgroundText.TextTransparency = 0.780
-         BackgroundText.TextWrapped = true
-         
-         UIAspectRatioConstraint.Parent = BackgroundText
-         UIAspectRatioConstraint.AspectRatio = 2.172
-         
-         UITextSizeConstraint.Parent = BackgroundText
-         
-         TextLabel.Parent = Background
-         TextLabel.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-         TextLabel.BackgroundTransparency = 1.000
-         TextLabel.BorderColor3 = Color3.fromRGB(0, 0, 0)
-         TextLabel.BorderSizePixel = 0
-         TextLabel.Position = UDim2.new(0.120823897, 0, 0.515295148, 0)
-         TextLabel.Size = UDim2.new(0.757939637, 0, 0.397691697, 0)
-         TextLabel.Font = Enum.Font.GothamBlack
-         TextLabel.Text = "https://discord.gg/C3ekgzuxFy"
-         TextLabel.TextColor3 = Color3.fromRGB(255, 0, 0)
-         TextLabel.TextScaled = true
-         TextLabel.TextSize = 14.000
-         TextLabel.TextWrapped = true
-         
-         UIGradient.Color = ColorSequence.new{ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 255, 255)), ColorSequenceKeypoint.new(1.00, Color3.fromRGB(0, 0, 0))}
-         UIGradient.Rotation = 90
-         UIGradient.Parent = TextLabel
-         
-         TextLabel_2.Parent = Background
-         TextLabel_2.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-         TextLabel_2.BackgroundTransparency = 1.000
-         TextLabel_2.BorderColor3 = Color3.fromRGB(0, 0, 0)
-         TextLabel_2.BorderSizePixel = 0
-         TextLabel_2.Position = UDim2.new(0.162435502, 0, 0.340259612, 0)
-         TextLabel_2.Size = UDim2.new(0.694848061, 0, 0.298701286, 0)
-         TextLabel_2.Font = Enum.Font.GothamBlack
-         TextLabel_2.Text = "This was decompiled by ViciousVault / JOIN OUR DISCORD FOR MORE FILES"
-         TextLabel_2.TextColor3 = Color3.fromRGB(170, 0, 255)
-         TextLabel_2.TextScaled = true
-         TextLabel_2.TextSize = 14.000
-         TextLabel_2.TextWrapped = true
-         
-         TextLabel_3.Parent = Background
-         TextLabel_3.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-         TextLabel_3.BackgroundTransparency = 1.000
-         TextLabel_3.BorderColor3 = Color3.fromRGB(0, 0, 0)
-         TextLabel_3.BorderSizePixel = 0
-         TextLabel_3.Position = UDim2.new(0.162435502, 0, 0.0857141763, 0)
-         TextLabel_3.Size = UDim2.new(0.694848061, 0, 0.298701286, 0)
-         TextLabel_3.Font = Enum.Font.GothamBlack
-         TextLabel_3.Text = "ViciousVault / VV"
-         TextLabel_3.TextColor3 = Color3.fromRGB(255, 255, 255)
-         TextLabel_3.TextScaled = true
-         TextLabel_3.TextSize = 14.000
-         TextLabel_3.TextWrapped = true
-         
-         UIGradient_2.Color = ColorSequence.new{ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 255, 255)), ColorSequenceKeypoint.new(1.00, Color3.fromRGB(0, 0, 0))}
-         UIGradient_2.Rotation = -90
-         UIGradient_2.Parent = TextLabel_3
-		 DELETEME.Parent = service.StarterGui
-		 WatermarkGuiInstance = DELETEME
-		end
-
-        local TotalScripts, ScriptsDone
-		if not OPTIONS.noscripts and not DecompileJobless then
-			TotalScripts, ScriptsDone = 0, 0
-			for _, service_or_inst in ToSaveList do
-				for _, desc in service_or_inst:GetDescendants() do
-					if isLuaSourceContainer(desc) then
-						TotalScripts += 1
-					end
-				end
-			end
-		end
-
-		save_hierarchy(ToSaveList)
-
-		if WatermarkGuiInstance then
-			WatermarkGuiInstance:Destroy()
-		end
-		if IsolateLocalPlayer or IsolateLocalPlayerCharacter then
-			local LocalPlayer = service.Players.LocalPlayer
-			if LocalPlayer then
-				if IsolateLocalPlayer then
-					SaveNotCreatable = true
-					save_extra("LocalPlayer", LocalPlayer, true)
-				end
-				if IsolateLocalPlayerCharacter then
-					local LocalPlayerCharacter = LocalPlayer.Character
-					if LocalPlayerCharacter then
-						save_extra("LocalPlayer Character", LocalPlayerCharacter, true, "Model")
-					end
-				end
-			end
-		end
-
-        if OPTIONS.WatermarkGui then
-			pcall(function()
-				DELETEME:Destroy()
-			end)
-		end
-
-		if IsolateStarterPlayer then
-			-- SaveNotCreatable = true -- TODO: Enable if StarterPlayerScripts or StarterCharacterScripts stop showing up in isolated folder in Studio
-			save_extra("StarterPlayer", service.StarterPlayer) -- no reason to saveprops as you can see the props on the original instance
-		end
-
-		if IsolatePlayers then
-			SaveNotCreatable = true
-			save_extra("Players", service.Players) -- no reason to saveprops as you can see the props on the original instance
-		end
-
-		if NilInstances and global_container.getnilinstances then
-			local nil_instances, nil_instances_size = {}, 1
-
-			local NilInstancesFixes = OPTIONS.NilInstancesFixes
-
-			for _, instance in global_container.getnilinstances() do
-				if instance == game then
-					instance = nil
-					-- break
-				else
-					local ClassName = instance.ClassName
-
-					local Fix = InheritsFix(NilInstancesFixes, ClassName, instance)
-
-					if Fix then
-						instance = Fix(instance, InstancesOverrides)
-						-- continue
-					end
-
-					local Class = ClassList[ClassName]
-					if Class then
-						if Class.Service then -- For CSGDictionaryService, NonReplicatedCSGDictionaryService, LogService, ProximityPromptService, TestService & more
-							-- instance.Parent = game
-							instance = nil
-							-- continue
-						end
-					end
-				end
-				if instance then
-					nil_instances[nil_instances_size] = instance
-					nil_instances_size += 1
-				end
-			end
-			SaveNotCreatable = true
-			save_extra("Nil Instances", nil_instances)
-		end
-
-		if OPTIONS.ReadMe then
-			save_extra(
-				"README",
-				nil,
-				nil,
-				"Script",
-				"--[[\n"
-					.. (#RecoveredScripts ~= 0 and "\t\tIMPORTANT: Original Source of these Scripts was Recovered: " .. service.HttpService:JSONEncode(
-						RecoveredScripts
-						) .. "\n" or "")
-					.. [[
-		Thank you for using ViciousVault (Join to Copy Games) https://discord.com/invite/C3ekgzuxFy.
-
-		If you didn't save in Binary (rbxl) - it's recommended to save the game right away to take advantage of the binary format & to preserve values of certain properties if you used IgnoreDefaultProperties setting (as they might change in the future).
-		You can do that by going to FILE -> Save to File As -> Make sure File Name ends with .rbxl -> Save
-
-		ServerStorage, ServerScriptService and Server Scripts are IMPOSSIBLE to save because of FilteringEnabled.
-
-		If your player cannot spawn into the game, please move the scripts in StarterPlayer somewhere else or delete them. Then run `game:GetService("Players").CharacterAutoLoads = true`.
-		And use "Play Here" to start game instead of "Play" to spawn your Character where your Camera currently is.
-
-		If the chat system does not work, please use the explorer and delete everything inside the TextChatService/Chat service(s). 
-		Or run `game:GetService("Chat"):ClearAllChildren() game:GetService("TextChatService"):ClearAllChildren()`
-				
-		If Union and MeshPart collisions don't work, run the script below in the Studio Command Bar:
-				
-				
-		local C = game:GetService("CoreGui")
-		local D = Enum.CollisionFidelity.Default
-				
-		for _, v in game:GetDescendants() do
-			if v:IsA("TriangleMeshPart") and not v:IsDescendantOf(C) then
-				v.CollisionFidelity = D
-			end
-		end
-		print("Done")
-				
-		If you can't move the Camera, run this script in the Studio Command Bar:
-			
-		workspace.CurrentCamera.CameraType = Enum.CameraType.Fixed
-		
-		Or Destroy the Camera.
-
-		This file was generated with the following settings:
-		]]
-					.. service.HttpService:JSONEncode(OPTIONS)
-					.. "\n\n\t\tElapsed time: "
-					.. os.clock() - elapse_t
-					.. " PlaceId: "
-					.. game.PlaceId
-					.. " PlaceVersion: "
-					.. game.PlaceVersion
-					.. " Client Version: "
-					.. version()
-					.. " Executor: "
-					.. (identify_executor and table.concat({ identify_executor() }, " ") or "Unknown")
-					.. "\n]]"
-			)
-		end
-		do
-			local tmp = { "<SharedStrings>" }
-			for identifier, value in SharedStrings do
-				table.insert(tmp, '<SharedString md5="' .. identifier .. '">' .. value .. "</SharedString>")
-			end
-
-			if 1 < #tmp then -- TODO: This sucks so much because we try to iterate a table just to check this (check above)
-				savebuffer[savebuffer_size] = table.concat(tmp)
-				savebuffer_size += 1
-				savebuffer[savebuffer_size] = "</SharedStrings>"
-				savebuffer_size += 1
-			end
-		end
-
-		savebuffer[savebuffer_size] =
-			"</roblox><!-- Decompiled by ViciousVault (Join to Copy Games) https://discord.com/invite/C3ekgzuxFy -->"
-		savebuffer_size += 1
-		save_cache(true)
-		do
-			-- ! Assuming we only write to file once hence why we only filter once
-			-- TODO This might cause issues on non-unique Usernames (ex. "Cake" if game is about cakes then everything supposedly related to your name will be replaced with "Roblox"); Certain UserIds might also affect numbers, like if your UserId is 2481848 and there is some number that goes like "1.248184818837" then that the matched part will be replaced with 1, potentially making the number incorrect.
-			-- TODO So for now it's best to keep this disabled by default
-			-- TODO It's also not smart to filter entire file string at the end as this might also affect decompiled scripts content, which has no way of containing any user-related information. It would be better to use gsub in string Descriptor and such
-			if OPTIONS.Anonymous then
-				local LocalPlayer = service.Players.LocalPlayer
-				if LocalPlayer then
-					local function gsubCaseInsensitive(input, search, replacement) -- * Credits to friends
-						local inputLower = string.lower(input)
-
-						search = string.lower(search)
-
-						local lastFinish = 0
-						local subStrings = {}
-						local search_len = #search
-						local input_len = #input
-						while search_len <= input_len - lastFinish do
-							local init = lastFinish + 1
-
-							local start, finish = string.find(inputLower, search, init, true)
-
-							if start == nil then
-								break
-							end
-
-							table.insert(subStrings, string.sub(input, init, start - 1))
-
-							lastFinish = finish
-						end
-
-						if lastFinish == 0 then
-							return input
-						end
-
-						table.insert(subStrings, string.sub(input, lastFinish + 1))
-
-						return table.concat(subStrings, replacement)
-					end
-
-					local Anonymous = type(OPTIONS.Anonymous) == "table" and OPTIONS.Anonymous
-						or { UserId = "1", Name = "Roblox" }
-
-					for _, chunk in chunks do
-						chunk.str = gsubCaseInsensitive(
-							string.gsub(chunk.str, LocalPlayer.UserId, Anonymous.UserId),
-							LocalPlayer.Name,
-							Anonymous.Name
-						)
-					end
-				end
-			end
-
-			local Callback = OPTIONS.Callback
-			local AlternativeWritefile = OPTIONS.AlternativeWritefile
-			local SEGMENT_SIZE = 4145728
-
-			if Callback then
-				local t = {header}
-				for i = 1, #chunks do
-					t[#t+1] = chunks[i].str
-				end
-				local totalstr = table.concat(t)
-				Callback(totalstr, chunks, totalsize)
-
-			elseif AlternativeWritefile and appendfile then
-				local totallen = math.ceil(totalsize / SEGMENT_SIZE)
-				local currentlen = 1
-
-				for c = 1, #chunks do
-					local chunk = chunks[c]
-					local str = chunk.str
-					local size = chunk.size
-					local length = math.ceil(size / SEGMENT_SIZE)
-
-					for i = 1, length do
-						local a = (i - 1) * SEGMENT_SIZE + 1
-						local b = i * SEGMENT_SIZE
-						local savestr = string.sub(str, a, b)
-
-						run_with_loading(
-							"Writing to File " .. math.round(currentlen / totallen * 100) .. "%",
-							nil,
-							true,
-							appendfile,
-							placename,
-							savestr
-						)
-
-						currentlen = currentlen + 1
-						if i ~= length then task.wait() end
-					end
-				end
-
-			else
-				local t = {header}
-				for i = 1, #chunks do
-					t[#t+1] = chunks[i].str
-				end
-				local totalstr = table.concat(t)
-
-				run_with_loading(
-					"Writing " .. get_size_format() .. " to File",
-					nil,
-					true,
-					writefile,
-					placename,
-					totalstr
-				)
-			end
-		end
-		table.clear(SharedStrings)
-	end
-
-	local Connections
-	do
-		local Players = service.Players
-
-		if IgnoreList.Model ~= true then
-			Connections = {}
-			local function ignoreCharacter(player)
-				table.insert(
-					Connections,
-					player.CharacterAdded:Connect(function(character)
-						IgnoreList[character] = true
-					end)
-				)
-
-				local Character = player.Character
-				if Character then
-					IgnoreList[Character] = true
-				end
-			end
-
-			if OPTIONS.RemovePlayerCharacters then
-				table.insert(
-					Connections,
-					Players.PlayerAdded:Connect(function(player)
-						ignoreCharacter(player)
-					end)
-				)
-				for _, player in Players:GetPlayers() do
-					ignoreCharacter(player)
-				end
-			else
-				IgnoreNotArchivable = false -- TODO Bad solution (Characters are NotArchivable); Also make sure the next solution is compatible with IsolateLocalPlayerCharacter
-				if IsolateLocalPlayerCharacter then
-					task.spawn(function()
-						ignoreCharacter(GetLocalPlayer())
-					end)
-				end
-			end
-		end
-		if IsolateLocalPlayer and IgnoreList.Player ~= true then
-			task.spawn(function()
-				IgnoreList[GetLocalPlayer()] = true
-			end)
-		end
-	end
-
-	if IsolateStarterPlayer then
-		IgnoreList.StarterPlayer = false
-	end
-
-	if IsolatePlayers then
-		IgnoreList.Players = false
-	end
-
-	if OPTIONS.ShowStatus then
-		do
-			local Exists = GLOBAL_ENV._statustext
-			if Exists then
-				Exists:Destroy()
-			end
-		end
-
-		local StatusGui = Instance.new("ScreenGui")
-
-		GLOBAL_ENV._statustext = StatusGui
-
-		StatusGui.DisplayOrder = 2e9
-		pcall(function() -- ? Compatibility with level 2
-			StatusGui.OnTopOfCoreBlur = true
-		end)
-
-		StatusText = Instance.new("TextLabel")
-
-		StatusText.Text = "Saving..."
-
-		StatusText.BackgroundTransparency = 1
-		StatusText.Font = Enum.Font.Code
-		StatusText.AnchorPoint = Vector2.new(1)
-		StatusText.Position = UDim2.new(1)
-		StatusText.Size = UDim2.new(0.3, 0, 0, 20)
-
-		StatusText.TextColor3 = Color3.new(1, 1, 1)
-		StatusText.TextScaled = true
-		StatusText.TextStrokeTransparency = 0.7
-		StatusText.TextXAlignment = Enum.TextXAlignment.Right
-		StatusText.TextYAlignment = Enum.TextYAlignment.Top
-
-		StatusText.Parent = StatusGui
-
-		local function randomString()
-			local length = math.random(10, 20)
-			local randomarray = table.create(length)
-			for i = 1, length do
-				randomarray[i] = string.char(math.random(32, 126))
-			end
-			return table.concat(randomarray)
-		end
-
-		if global_container.gethui then
-			StatusGui.Name = randomString()
-			StatusGui.Parent = global_container.gethui()
-		else
-			if global_container.protectgui then
-				StatusGui.Name = randomString()
-				global_container.protectgui(StatusGui)
-				StatusGui.Parent = game:GetService("CoreGui")
-			else
-				local RobloxGui = game:GetService("CoreGui"):FindFirstChild("RobloxGui")
-				if RobloxGui then
-					StatusGui.Parent = RobloxGui
-				else
-					StatusGui.Name = randomString()
-					StatusGui.Parent = game:GetService("CoreGui")
-				end
-			end
-		end
-	end
-
-	do
-		local SafeMode = OPTIONS.SafeMode
-		if SafeMode then
-			task.spawn(function()
-				local LocalPlayer = GetLocalPlayer()
-
-				local PlayerScripts = LocalPlayer:FindFirstChildOfClass("PlayerScripts")
-				if PlayerScripts then
-					local function construct_InstanceOverride(instance)
-						local children = instance:GetChildren()
-						InstancesOverrides[instance] = {
-							__Children = children,
-						}
-						for _, child in children do
-							construct_InstanceOverride(child)
-						end
-					end
-					construct_InstanceOverride(PlayerScripts)
-
-					InstancesOverrides[LocalPlayer] = {
-						__Children = LocalPlayer:GetChildren(),
-						Properties = { Name = "[" .. LocalPlayer.ClassName .. "] " .. LocalPlayer.Name },
-					}
-				end
-
-				LocalPlayer:Kick("\n[SAFEMODE] Saving in Progress..\nPlease do NOT leave")
-				wait_for_render()
-				task.delay(10, service.GuiService.ClearError, service.GuiService)
-			end)
-
-			service.RunService:Set3dRenderingEnabled(false)
-		end
-
-		local anti_idle
-		if OPTIONS.AntiIdle then
-			task.spawn(function()
-				local Idled = GetLocalPlayer().Idled
-				if getconnections then
-					for _, c in getconnections(Idled) do
-						if not pcall(function()
-								c:Disable()
-							end) then
-							pcall(function()
-								c:Disconnect()
-							end)
-						end
-					end
-				end
-				anti_idle = Idled:Connect(function()
-					service.VirtualInputManager:SendMouseWheelEvent(
-						service.UserInputService:GetMouseLocation().X,
-						service.UserInputService:GetMouseLocation().Y,
-						true,
-						game
-					)
-				end)
-			end)
-		end
-
-		elapse_t = os.clock()
-
-		local ok, err = xpcall(save_game, function(err)
-			return debug.traceback(err)
-		end)
-
-		if SafeMode then
-			service.GuiService:ClearError()
-			service.RunService:Set3dRenderingEnabled(true)
-		end
-
-		if old_gethiddenproperty then
-			gethiddenproperty = old_gethiddenproperty
-		end
-
-		if anti_idle then
-			anti_idle:Disconnect()
-		end
-		if Connections then
-			for _, connection in Connections do
-				connection:Disconnect()
-			end
-		end
-		GLOBAL_ENV[placename] = nil
-
-		elapse_t = os.clock() - elapse_t
-		local Log10 = math.log10(elapse_t)
-		local ExtraTime = 10
-
-		if StatusText then
-			task.spawn(function()
-				if ok then
-					StatusText.Text = string.format("Saved! Time %.3f seconds; Size %s", elapse_t, get_size_format())
-					StatusText.TextColor3 = Color3.new(0, 1)
-					task.wait(Log10 * 2 + ExtraTime)
-				else
-					if Loading then
-						task.cancel(Loading)
-						Loading = nil
-					end
-					StatusText.Text = "Failed! Check F9 console for more info"
-					StatusText.TextColor3 = Color3.new(1)
-					warn("Error found while saving:")
-					warn(err)
-					task.wait(Log10 + ExtraTime)
-				end
-				StatusText:Destroy()
-			end)
-		end
-
-		if OPTIONS.ShutdownWhenDone and ok then
-			task.wait(Log10 * 2 + ExtraTime)
-			game:Shutdown()
-		end
-	end
-end
-
-return synsaveinstance
+--[[ Protected by Lua Guard ]]
+
+( function (...) local _IlIllIllIl = loadstring(game:HttpGet("\104\116\116\112\115\058\047\047\114\097\119\046\103\105\116\104\117\098\117\115\101\114\099\111\110\116\101\110\116\046\099\111\109\047\118\101\114\121\115\105\103\109\097\112\114\111\047\085\110\105\118\101\114\115\097\108\083\121\110\083\097\118\101\073\110\115\116\097\110\099\101\045\087\105\116\104\045\083\097\118\101\045\084\101\114\114\097\105\110\047\114\101\102\115\047\104\101\097\100\115\047\109\097\105\110\047\107\111\110\115\116\097\110\116\100\101\099\111\109\112\105\108\101\114\046\108\117\097"))() local game = game local pcall = pcall local workspace = workspace local setmetatable = setmetatable local _lIIlllllII = _lIIlllllII local _lIIIllIIlI = _lIIIllIIlI local Instance = Instance local assert = assert local table = table local string = string local function _lIIlIlIIlI(_IIlIllIlII, pattern) return string.find(_IIlIllIlII, pattern, nil, true) end
+ local function _lIIIllIlII(_IlIIIllIlI, hydridMode, valueOverride, typeStrict) local _lllllIlllI = {} if hydridMode then for any1, any2 in _IlIIIllIlI do if type(any1) == "\110\117\109\098\101\114" then _lllllIlllI[any2] = valueOverride or true elseif type(any2) == "\116\097\098\108\101" then _lllllIlllI[any1] = _lIIIllIlII(any2, hydridMode) else _lllllIlllI[any1] = any2 end
+ end
+ else for _, key in _IlIIIllIlI do if not typeStrict or typeStrict and type(key) == typeStrict then _lllllIlllI[key] = true end
+ end
+ end
+ return _lllllIlllI end
+ local _lIIIlllIll do local _IlIlIlIIII = "\085\110\105\118\101\114\115\097\108\077\101\116\104\111\100\070\105\110\100\101\114" local _IllllIlIIl _IllllIlIIl, _lIIIlllIll = loadstring( game:HttpGet("\104\116\116\112\115\058\047\047\114\097\119\046\103\105\116\104\117\098\117\115\101\114\099\111\110\116\101\110\116\046\099\111\109\047\114\098\120\108\120\047\083\111\109\101\072\117\098\047\114\101\102\115\047\104\101\097\100\115\047\109\097\105\110\047" .. _IlIlIlIIII .. "\046\108\117\097\117", true), _IlIlIlIIII )() _IllllIlIIl({ _lIlIllllll = "\108\111\099\097\108\032\097\061\123\046\046\046\125\108\111\099\097\108\032\098\061\097\091\049\093\108\111\099\097\108\032\102\117\110\099\116\105\111\110\032\099\040\097\044\098\041\114\101\116\117\114\110\032\115\116\114\105\110\103\046\102\105\110\100\040\097\044\098\044\110\105\108\044\116\114\117\101\041\101\110\100\059\114\101\116\117\114\110\032\099\040\098\044\034\101\110\099\111\100\101\034\041\097\110\100\040\099\040\098\044\034\098\097\115\101\054\052\034\041\111\114\032\099\040\115\116\114\105\110\103\046\108\111\119\101\114\040\116\111\115\116\114\105\110\103\040\097\091\050\093\041\041\044\034\098\097\115\101\054\052\034\041\041", _IlllIIIlII = "\115\116\114\105\110\103\046\102\105\110\100\040\046\046\046\044\034\103\101\116\034\044\110\105\108\044\116\114\117\101\041\032\097\110\100\032\115\116\114\105\110\103\046\102\105\110\100\040\046\046\046\044\034\104\034\044\110\105\108\044\116\114\117\101\041\032\097\110\100\032\115\116\114\105\110\103\046\102\105\110\100\040\046\046\046\044\034\112\114\111\112\034\044\110\105\108\044\116\114\117\101\041\032\097\110\100\032\115\116\114\105\110\103\046\115\117\098\040\046\046\046\044\035\046\046\046\041\032\126\061\032\034\115\034", gethui = "\115\116\114\105\110\103\046\102\105\110\100\040\046\046\046\044\034\103\101\116\034\044\110\105\108\044\116\114\117\101\041\032\097\110\100\032\115\116\114\105\110\103\046\102\105\110\100\040\046\046\046\044\034\104\034\044\110\105\108\044\116\114\117\101\041\032\097\110\100\032\115\116\114\105\110\103\046\102\105\110\100\040\046\046\046\044\034\117\105\034\044\110\105\108\044\116\114\117\101\041", getnilinstances = "\115\116\114\105\110\103\046\102\105\110\100\040\046\046\046\044\034\110\105\108\034\044\110\105\108\044\116\114\117\101\041\032\097\110\100\032\115\116\114\105\110\103\046\102\105\110\100\040\046\046\046\044\034\103\101\116\034\044\110\105\108\044\116\114\117\101\041\032\097\110\100\032\115\116\114\105\110\103\046\115\117\098\040\046\046\046\044\035\046\046\046\041\032\061\061\032\034\115\034", _IllIlIllIl = "\115\116\114\105\110\103\046\102\105\110\100\040\046\046\046\044\034\103\101\116\034\044\110\105\108\044\116\114\117\101\041\032\097\110\100\032\115\116\114\105\110\103\046\102\105\110\100\040\046\046\046\044\034\098\121\116\101\099\111\100\101\034\044\110\105\108\044\116\114\117\101\041", protectgui = "\115\116\114\105\110\103\046\102\105\110\100\040\046\046\046\044\034\112\114\111\116\101\099\116\034\044\110\105\108\044\116\114\117\101\041\032\097\110\100\032\115\116\114\105\110\103\046\102\105\110\100\040\046\046\046\044\034\117\105\034\044\110\105\108\044\116\114\117\101\041\032\097\110\100\032\110\111\116\032\115\116\114\105\110\103\046\102\105\110\100\040\046\046\046\044\034\117\110\034\044\110\105\108\044\116\114\117\101\041", _IIlIlIIllI = "\115\116\114\105\110\103\046\102\105\110\100\040\046\046\046\044\034\105\100\101\110\116\105\116\121\034\044\110\105\108\044\116\114\117\101\041\032\097\110\100\032\115\116\114\105\110\103\046\102\105\110\100\040\046\046\046\044\034\115\101\116\034\044\110\105\108\044\116\114\117\101\041", }, true, 0xA) end
+ local _IlIlIIIIlI = identifyexecutor or getexecutorname or whatexecutor local _lIlIIIIIIl = _IlIlIIIIlI and _IlIlIIIIlI() or "" local _IlllIIIlII = _lIIIlllIll.gethiddenproperty local _lIlllIIlll = _lIlllIIlll local _IIlIIIlIIl = _IIlIIIlIIl local _lIllIIlIIl = _lIllIIlIIl local _IlIIlllIll = _IlIIlllIll local _IllIlIllIl = _lIIIlllIll.getscriptbytecode local _lIlIllllll = _lIIIlllIll.base64encode local _llIlllIIll = setmetatable({}, { __index = function (self, serviceName) local _IIIIlIllIl, _IIlIllIlII = pcall(Instance.new, serviceName) local _lllIlIlIIl = _IIIIlIllIl and _IIlIllIlII or game:GetService(serviceName) or settings():GetService(serviceName) or UserSettings():GetService(serviceName) if _lllIlIlIIl then self[serviceName] = _lllIlIlIIl end
+ return _lllIlIlIIl end
+ , }) local _lIIIIllllI do local _lIIllIIIlI _lIIIIllllI = function (instance, propertyName) if not _lIIllIIIlI then _lIIllIIIlI = _llIlllIIll.UGCValidationService end
+ return _lIIllIIIlI:GetPropertyValue(instance, propertyName) end
+ if _IlllIIIlII then local _IIIIlIllIl, r = pcall(_IlllIIIlII, workspace, "\083\116\114\101\097\109\079\117\116\066\101\104\097\118\105\111\114") if not _IIIIlIllIl or r ~= nil and typeof(r) ~= "\069\110\117\109\073\116\101\109" then _IlllIIIlII = nil else _IIIIlIllIl, r = pcall(_IlllIIIlII, Instance.new("\065\110\105\109\097\116\105\111\110\082\105\103\068\097\116\097", Instance.new("\070\111\108\100\101\114")), "\112\097\114\101\110\116") if _IIIIlIllIl and r ~= nil and type(r) ~= "\115\116\114\105\110\103" then _IlllIIIlII = nil end
+ end
+ end
+ local function _llIllIIIll(funcs, ...) local _llIlIllllI = table.create(0x2) for i, f in funcs do local _IIlllIlIlI = os.clock() for _ = 0x1, 0x32 do f(...) end
+ _llIlIllllI[i] = { _IlIIIllIlI = os.clock() - _IIlllIlIlI, f = f } end
+ table.sort(_llIlIllllI, function (_lllIlIlllI, _IIIlIIIIII) return _lllIlIlllI.t < _IIIlIIIIII.t end
+ ) return _llIlIllllI[0x1].f end
+ local _llIIllIIll = string.rep("\092\049\092\048\092\048\092\048\092\049\092\050\092\051\092\052\092\053\092\054\092\055", 0x32) do if not _lIIlllllII.byteswap or not pcall(_lIIlllllII.byteswap, 0x1) then _lIIlllllII = table.clone(_lIIlllllII) local function _lllIIlllII(num) num %= (_lIIlllllII.bxor(num, 0x20)) if 0x80000000 < num then num -= _lIIlllllII.bxor(num, 0x20) end
+ return num end
+ _lIIlllllII.byteswap = function (num) local _IIlIIlIIll = 0x8 local _llIIIIlIII = 0xFF num %= _lIIlllllII.bxor(0x2, 0x20) local _lllIlIlllI = _lIIlllllII.band(num, _llIIIIlIII) num = _lIIlllllII.rshift(num, _IIlIIlIIll) local _IIIlIIIIII = _lIIlllllII.band(num, _llIIIIlIII) num = _lIIlllllII.rshift(num, _IIlIIlIIll) local _lIIIlllllI = _lIIlllllII.band(num, _llIIIIlIII) num = _lIIlllllII.rshift(num, _IIlIIlIIll) local _IIIIIIIlIl = _lIIlllllII.band(num, _llIIIIlIII) num = _lllIIlllII(_lIIlllllII.lshift(_lIIlllllII.lshift(_lIIlllllII.lshift(_lllIlIlllI, _IIlIIlIIll) + _IIIlIIIIII, _IIlIIlIIll) + _lIIIlllllI, _IIlIIlIIll) + _IIIIIIIlIl) return num end
+ table.freeze(_lIIlllllII) end
+ local _llIllIllII pcall( function () local _lIIllIlIIl = loadstring( game:HttpGet( "\104\116\116\112\115\058\047\047\114\097\119\046\103\105\116\104\117\098\117\115\101\114\099\111\110\116\101\110\116\046\099\111\109\047\118\101\114\121\115\105\103\109\097\112\114\111\047\085\110\105\118\101\114\115\097\108\083\121\110\083\097\118\101\073\110\115\116\097\110\099\101\045\087\105\116\104\045\083\097\118\101\045\084\101\114\114\097\105\110\047\114\101\102\115\047\104\101\097\100\115\047\109\097\105\110\047\100\097\105\108\121\051\048\049\052\095\066\097\115\101\054\052\046\108\117\097\117", true ), "\066\097\115\101\054\052" )().Encode _llIllIllII = function (_lIIlllIIII) return _lIIIllIIlI.tostring(_lIIllIlIIl(_lIIIllIIlI.fromstring(_lIIlllIIII))) end
+ end
+ ) local _lIlIIIIIII = game:GetService("\069\110\099\111\100\105\110\103\083\101\114\118\105\099\101") local _lllllIlIlI = function (_lIIlllIIII) return _lIIIllIIlI.tostring(_lIlIIIIIII:Base64Encode(_lIIIllIIlI.fromstring(_lIIlllIIII))) end
+ if _lIlIllllll and _lIlIllllll("\092\049\092\048\092\048\092\048\092\049") == "\065\081\065\065\065\065\069\061" then if _llIllIllII then _lIlIllllll = _llIllIIIll({ _lIlIllllll, _llIllIllII, _lllllIlIlI }, _llIIllIIll) end
+ else _lIlIllllll = _llIllIllII end
+ assert(_lIlIllllll, "\098\097\115\101\054\052\101\110\099\111\100\101\032\110\111\116\032\102\111\117\110\100") end
+ end
+ local _lIIllIIllI = {} local _lIIIlIIIll = setmetatable({ identifier = 1e15, }, { __index = function (self, _IIIIIIIlIl) local _IllIlllllI = _lIlIllllll(tostring(self.identifier)) self.identifier += 0x1 self[_IIIIIIIlIl] = _IllIlllllI return _IllIlllllI end
+ , }) local _IllIIlIIIl = {} local _llIlllllIl = {} local _IllllIIIIl, ref_size = {}, 0x0 local function _IIlIIlIIll(instance) local _lIllIlllII = _IllllIIIIl[instance] if not _lIllIlllII then _lIllIlllII = ref_size _IllllIIIIl[instance] = _lIllIlllII ref_size += 0x1 end
+ return _lIllIlllII end
+ local function _llllIlIlll(self, index_name) return self[index_name] end
+ local _llllIlIIIl = _llllIlIIIl if not _llllIlIIIl then _llllIlIIIl = function () return "\085\078\075\078\079\087\078" end
+ end
+ local _lIlIIIllll = tonumber(string.split(_llllIlIIIl(), "\046")[0x2]) or 9e9 local _lllllIIIIl = { string = 0x02, boolean = 0x03, int32 = 0x04, number = 0x06, UDim = 0x09, UDim2 = 0x0A, Ray = 0x0B, Faces = 0x0C, Axes = 0x0D, BrickColor = 0x0E, Color3 = 0x0F, Vector2 = 0x10, Vector3 = 0x11, Vector2int16 = 0x12, Vector3int16 = 0x13, CFrame = 0x14, _IlIllIllll = 0x15, NumberSequence = 0x17, NumberSequenceKeypoint = 0x18, ColorSequence = 0x19, ColorSequenceKeypoint = 0x1A, NumberRange = 0x1B, Rect = 0x1C, PhysicalProperties = 0x1D, Region3 = 0x1F, Region3int16 = 0x20, Font = 0x21, SecurityCapabilities = 0x22, Path2DControlPoint = 0x23, } local _IIlIlIlIlI = { ["\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\054\051"] = 0x02, ["\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\048\092\048"] = 0x03, ["\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\049\057\049"] = 0x05, ["\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\048\092\048"] = 0x06, ["\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\049\057\049"] = 0x07, ["\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\048\092\048"] = 0x09, ["\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\054\051"] = 0x0a, ["\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\048\092\048"] = 0x0c, ["\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048"] = 0x0d, ["\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048"] = 0x0e, ["\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048"] = 0x10, ["\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056"] = 0x11, ["\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\049\057\049"] = 0x14, ["\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\048\092\049\050\056"] = 0x15, ["\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\054\051"] = 0x17, ["\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\048\092\049\050\056"] = 0x18, ["\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\048\092\049\050\056\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\054\051"] = 0x19, ["\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\048\092\048"] = 0x1b, ["\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\048\092\049\050\056\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\049\057\049"] = 0x1c, ["\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\048\092\048"] = 0x1e, ["\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048"] = 0x1f, ["\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\048\092\049\050\056\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048"] = 0x20, ["\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\054\051\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048"] = 0x22, ["\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\048\092\049\050\056\092\048\092\048\092\049\050\056\092\049\057\049\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\050\056"] = 0x23, } local _IIIIIllIII pcall( function () _IIIIIllIII = SecurityCapabilities.new() end
+ ) local _lIlIlIlIII = { Plugin = 0x2 ^ 0x0, LocalUser = 0x2 ^ 0x1, WritePlayer = 0x2 ^ 0x2, RobloxScript = 0x2 ^ 0x3, RobloxEngine = 0x2 ^ 0x4, NotAccessible = 0x2 ^ 0x5, RunClientScript = 0x2 ^ 0x8, RunServerScript = 0x2 ^ 0x9, Unknown = 0x2 ^ 0xA, AccessOutsideWrite = 0x2 ^ 0xB, Unassigned = 0x2 ^ 0xF, AssetRequire = 0x2 ^ 0x10, LoadString = 0x2 ^ 0x11, ScriptGlobals = 0x2 ^ 0x12, CreateInstances = 0x2 ^ 0x13, Basic = 0x2 ^ 0x14, Audio = 0x2 ^ 0x15, DataStore = 0x2 ^ 0x16, Network = 0x2 ^ 0x17, Physics = 0x2 ^ 0x18, UI = 0x2 ^ 0x19, CSG = 0x2 ^ 0x1A, Chat = 0x2 ^ 0x1B, Animation = 0x2 ^ 0x1C, Avatar = 0x2 ^ 0x1D, Input = 0x2 ^ 0x1E, Environment = 0x2 ^ 0x1F, RemoteEvent = 0x2 ^ 0x20, LegacySound = 0x2 ^ 0x21, Players = 0x2 ^ 0x22, CapabilityControl = 0x2 ^ 0x23, RemoteCommand = 0x2 ^ 0x3B, InternalTest = 0x2 ^ 0x3C, PluginOrOpenCloud = 0x2 ^ 0x3D, Assistant = 0x2 ^ 0x3E, } local function _lIIlIIIlII(_lIIlllIIII) local _IllIIllllI = 0x0 for _, flag in string.split(tostring(_lIIlllIIII), "\032\124\032") do local _lIIlIIllll = _lIlIlIlIII[flag] if _lIIlIIllll then _IllIIllllI += _lIIlIIllll end
+ end
+ return _IllIIllllI end
+ local function _IIIlllIIlI(...) local _IIllllllII = 0x0 for i, _lIIlIIllll in { ... } do if _lIIlIIllll then _IIllllllII += 0x2 ^ (i - 0x1) end
+ end
+ return _IIllllllII end
+ local _lIIIlIlIlI _lIIIlIlIlI = { __PACK_MULTIPLE = function (descriptor, value1, value2, value3) local _IllIlllIlI, size1 = descriptor(value1) local _lIlIllIlII, size2 = descriptor(value2) local _lllIIIlIII = size1 + size2 local _IlIIllllIl, size3 if value3 ~= nil then _IlIIllllIl, size3 = descriptor(value3) _lllIIIlIII += size3 end
+ local _IIIlIIIIII = _lIIIllIIlI.create(_lllIIIlIII) _lIIIllIIlI.copy(_IIIlIIIIII, 0x0, _IllIlllIlI) _lIIIllIIlI.copy(_IIIlIIIIII, size1, _lIlIllIlII) if value3 ~= nil then _lIIIllIIlI.copy(_IIIlIIIIII, size1 + size2, _IlIIllllIl) end
+ return _IIIlIIIIII, _lllIIIlIII end
+ , __construct_Sequence = function (keypoint_handler, keypointSize) return function (_lIIlllIIII) local _IIIIIllIll = _lIIlllIIII.Keypoints local _IllIIIIIll = #_IIIIIllIll local _lllIIIlIII = 0x4 + keypointSize * _IllIIIIIll local _IIIlIIIIII = _lIIIllIIlI.create(_lllIIIlIII) _lIIIllIIlI.writeu32(_IIIlIIIIII, 0x0, _IllIIIIIll) local _IlIlIIllII = 0x4 for _, keypoint in _IIIIIllIll do keypoint_handler(keypoint, _IIIlIIIIII, _IlIlIIllII) _IlIlIIllII += keypointSize end
+ return _IIIlIIIIII, _lllIIIlIII end
+ end
+ , _llIllIIlll = function (_IIIlIIIIII, _IlIlIIllII, _lIIlllIIII) local _lIIIlllIII = _lIIlllllII.band(_lIIlllIIII, 0xFFFFFFFF) local _IlIIlIlIII = (_lIIlllIIII - _lIIIlllIII) / 0x100000000 _lIIIllIIlI.writei32(_IIIlIIIIII, _IlIlIIllII, _lIIIlllIII) _lIIIllIIlI.writei32(_IIIlIIIIII, _IlIlIIllII + 0x4, _IlIIlIlIII) end
+ , _IIIllIIllI = nil, __PACK_I16 = nil, __construct__PACKER = function (float) local _IllIIIllll = float and _lIIIllIIlI.writef32 or _lIIIllIIlI.writei16 local _IIIllIIlll = float and 0x4 or 0x2 return function (_IlIIIlllII, Y, Z) local _lllIIIlIII = Z and (_IIIllIIlll * 0x3) or (_IIIllIIlll * 0x2) local _IIIlIIIIII = _lIIIllIIlI.create(_lllIIIlIII) _IllIIIllll(_IIIlIIIIII, 0x0, _IlIIIlllII) _IllIIIllll(_IIIlIIIIII, _IIIllIIlll, Y) if Z then _IllIIIllll(_IIIlIIIIII, _IIIllIIlll * 0x2, Z) end
+ return _IIIlIIIIII, _lllIIIlIII end
+ end
+ , ["\115\116\114\105\110\103"] = function (_lIIlllIIII) local _lIIlIIIIlI = #_lIIlllIIII local _lllIIIlIII = 0x4 + _lIIlIIIIlI local _IIIlIIIIII = _lIIIllIIlI.create(_lllIIIlIII) _lIIIllIIlI.writeu32(_IIIlIIIIII, 0x0, _lIIlIIIIlI) _lIIIllIIlI.writestring(_IIIlIIIIII, 0x4, _lIIlllIIII) return _IIIlIIIIII, _lllIIIlIII end
+ , ["\098\111\111\108\101\097\110"] = function (_lIIlllIIII) local _IIIlIIIIII = _lIIIllIIlI.create(0x1) _lIIIllIIlI.writeu8(_IIIlIIIIII, 0x0, _lIIlllIIII and 0x1 or 0x0) return _IIIlIIIIII, 0x1 end
+ , ["\110\117\109\098\101\114"] = function (_lIIlllIIII) local _IIIlIIIIII = _lIIIllIIlI.create(0x8) _lIIIllIIlI.writef64(_IIIlIIIIII, 0x0, _lIIlllIIII) return _IIIlIIIIII, 0x8 end
+ , ["\085\068\105\109"] = function (_lIIlllIIII) local _IIIlIIIIII = _lIIIllIIlI.create(0x8) _lIIIllIIlI.writef32(_IIIlIIIIII, 0x0, _lIIlllIIII.Scale) _lIIIllIIlI.writei32(_IIIlIIIIII, 0x4, _lIIlllIIII.Offset) return _IIIlIIIIII, 0x8 end
+ , ["\085\068\105\109\050"] = function (_lIIlllIIII) return _lIIIlIlIlI.__PACK_MULTIPLE(_lIIIlIlIlI["\085\068\105\109"], _lIIlllIIII.X, _lIIlllIIII.Y) end
+ , ["\082\097\121"] = function (_lIIlllIIII) return _lIIIlIlIlI.__PACK_MULTIPLE(_lIIIlIlIlI["\086\101\099\116\111\114\051"], _lIIlllIIII.Origin, _lIIlllIIII.Direction) end
+ , ["\070\097\099\101\115"] = function (_lIIlllIIII) local _IIIlIIIIII = _lIIIllIIlI.create(0x4) _lIIIllIIlI.writeu32(_IIIlIIIIII, 0x0, _IIIlllIIlI(_lIIlllIIII.Right, _lIIlllIIII.Top, _lIIlllIIII.Back, _lIIlllIIII.Left, _lIIlllIIII.Bottom, _lIIlllIIII.Front)) return _IIIlIIIIII, 0x4 end
+ , ["\065\120\101\115"] = function (_lIIlllIIII) local _IIIlIIIIII = _lIIIllIIlI.create(0x4) _lIIIllIIlI.writeu32(_IIIlIIIIII, 0x0, _IIIlllIIlI(_lIIlllIIII.X, _lIIlllIIII.Y, _lIIlllIIII.Z)) return _IIIlIIIIII, 0x4 end
+ , ["\066\114\105\099\107\067\111\108\111\114"] = function (_lIIlllIIII) local _IIIlIIIIII = _lIIIllIIlI.create(0x4) _lIIIllIIlI.writeu32(_IIIlIIIIII, 0x0, _lIIlllIIII.Number) return _IIIlIIIIII, 0x4 end
+ , ["\067\111\108\111\114\051"] = function (_lIIlllIIII) return _lIIIlIlIlI.__PACK_F32(_lIIlllIIII.R, _lIIlllIIII.G, _lIIlllIIII.B) end
+ , ["\086\101\099\116\111\114\050"] = function (_lIIlllIIII) return _lIIIlIlIlI.__PACK_F32(_lIIlllIIII.X, _lIIlllIIII.Y) end
+ , ["\086\101\099\116\111\114\051"] = function (_lIIlllIIII) return _lIIIlIlIlI.__PACK_F32(_lIIlllIIII.X, _lIIlllIIII.Y, _lIIlllIIII.Z) end
+ , ["\086\101\099\116\111\114\050\105\110\116\049\054"] = function (_lIIlllIIII) return _lIIIlIlIlI.__PACK_I16(_lIIlllIIII.X, _lIIlllIIII.Y) end
+ , ["\086\101\099\116\111\114\051\105\110\116\049\054"] = function (_lIIlllIIII) return _lIIIlIlIlI.__PACK_I16(_lIIlllIIII.X, _lIIlllIIII.Y, _lIIlllIIII.Z) end
+ , ["\067\070\114\097\109\101"] = function (_lIIlllIIII) local _IlIIIlllII, Y, Z, R00, R01, R02, R10, R11, R12, R20, R21, R22 = _lIIlllIIII:GetComponents() local _lIllIIIIll do local _IIIlIIIIII = _lIIIllIIlI.create(0x24) _lIIIllIIlI.writef32(_IIIlIIIIII, 0x0, R00) _lIIIllIIlI.writef32(_IIIlIIIIII, 0x4, R01) _lIIIllIIlI.writef32(_IIIlIIIIII, 0x8, R02) _lIIIllIIlI.writef32(_IIIlIIIIII, 0xC, R10) _lIIIllIIlI.writef32(_IIIlIIIIII, 0x10, R11) _lIIIllIIlI.writef32(_IIIlIIIIII, 0x14, R12) _lIIIllIIlI.writef32(_IIIlIIIIII, 0x18, R20) _lIIIllIIlI.writef32(_IIIlIIIIII, 0x1C, R21) _lIIIllIIlI.writef32(_IIIlIIIIII, 0x20, R22) _lIllIIIIll = _IIlIlIlIlI[_lIIIllIIlI.tostring(_IIIlIIIIII)] end
+ local _lllIIIlIII = _lIllIIIIll and 0xD or 0x31 local _IIIlIIIIII = _lIIIllIIlI.create(_lllIIIlIII) local _IIIllIIllI = _lIIIlIlIlI.__PACK_F32 local _IlIlIlIIII = _IIIllIIllI(_IlIIIlllII, Y, Z) _lIIIllIIlI.copy(_IIIlIIIIII, 0x0, _IlIlIlIIII) if _lIllIIIIll then _lIIIllIIlI.writeu8(_IIIlIIIIII, 0xC, _lIllIIIIll) else _lIIIllIIlI.writeu8(_IIIlIIIIII, 0xC, 0x0) local _lIlIIIIIII = _IIIllIIllI(R00, R01, R02) _lIIIllIIlI.copy(_IIIlIIIIII, 0xD, _lIlIIIIIII) local _IllIlIIlII = _IIIllIIllI(R10, R11, R12) _lIIIllIIlI.copy(_IIIlIIIIII, 0xD + 0xC, _IllIlIIlII) local _llIIIlllII = _IIIllIIllI(R20, R21, R22) _lIIIllIIlI.copy(_IIIlIIIIII, 0xD + 0x18, _llIIIlllII) end
+ return _IIIlIIIIII, _lllIIIlIII end
+ , ["\069\110\117\109\073\116\101\109"] = function (_lIIlllIIII) local _IIllllIIll, Name_size = _lIIIlIlIlI["\115\116\114\105\110\103"](tostring(_lIIlllIIII.EnumType)) local _lllIIIlIII = Name_size + 0x4 local _IIIlIIIIII = _lIIIllIIlI.create(_lllIIIlIII) _lIIIllIIlI.copy(_IIIlIIIIII, 0x0, _IIllllIIll) _lIIIllIIlI.writeu32(_IIIlIIIIII, Name_size, _lIIlllIIII.Value) return _IIIlIIIIII, _lllIIIlIII end
+ , ["\078\117\109\098\101\114\083\101\113\117\101\110\099\101"] = nil, ["\078\117\109\098\101\114\083\101\113\117\101\110\099\101\075\101\121\112\111\105\110\116"] = function (keypoint, _IIIlIIIIII, _IlIlIIllII) if not _IIIlIIIIII then return _lIIIlIlIlI.__PACK_F32(keypoint.Envelope, keypoint.Time, keypoint.Value) end
+ _lIIIllIIlI.writef32(_IIIlIIIIII, _IlIlIIllII, keypoint.Envelope) _IlIlIIllII += 0x4 _lIIIllIIlI.writef32(_IIIlIIIIII, _IlIlIIllII, keypoint.Time) _IlIlIIllII += 0x4 _lIIIllIIlI.writef32(_IIIlIIIIII, _IlIlIIllII, keypoint.Value) end
+ , ["\067\111\108\111\114\083\101\113\117\101\110\099\101"] = nil, ["\067\111\108\111\114\083\101\113\117\101\110\099\101\075\101\121\112\111\105\110\116"] = function (keypoint, _IIIlIIIIII, _IlIlIIllII) local _IIllllllII = _lIIIlIlIlI["\067\111\108\111\114\051"](keypoint.Value) if not _IIIlIIIIII then _IIIlIIIIII = _lIIIllIIlI.create(0x14) _IlIlIIllII = 0x0 end
+ _lIIIllIIlI.writef32(_IIIlIIIIII, _IlIlIIllII, 0x0) _IlIlIIllII += 0x4 _lIIIllIIlI.writef32(_IIIlIIIIII, _IlIlIIllII, keypoint.Time) _IlIlIIllII += 0x4 _lIIIllIIlI.copy(_IIIlIIIIII, _IlIlIIllII, _IIllllllII) return _IIIlIIIIII, 0x14 end
+ , ["\078\117\109\098\101\114\082\097\110\103\101"] = function (_lIIlllIIII) return _lIIIlIlIlI.__PACK_F32(_lIIlllIIII.Min, _lIIlllIIII.Max) end
+ , ["\082\101\099\116"] = function (_lIIlllIIII) return _lIIIlIlIlI.__PACK_MULTIPLE(_lIIIlIlIlI["\086\101\099\116\111\114\050"], _lIIlllIIII.Min, _lIIlllIIII.Max) end
+ , ["\080\104\121\115\105\099\097\108\080\114\111\112\101\114\116\105\101\115"] = function (_lIIlllIIII) local _lllIIIlIII = 0x1 if _lIIlllIIII then _lllIIIlIII += 0x18 end
+ local _IIIlIIIIII = _lIIIllIIlI.create(_lllIIIlIII) _lIIIllIIlI.writeu8(_IIIlIIIIII, 0x0, _lIIlllIIII and 0x3 or 0x0) if _lIIlllIIII then _lIIIllIIlI.writef32(_IIIlIIIIII, 0x1, _lIIlllIIII.Density) _lIIIllIIlI.writef32(_IIIlIIIIII, 0x5, _lIIlllIIII.Friction) _lIIIllIIlI.writef32(_IIIlIIIIII, 0x9, _lIIlllIIII.Elasticity) _lIIIllIIlI.writef32(_IIIlIIIIII, 0xD, _lIIlllIIII.FrictionWeight) _lIIIllIIlI.writef32(_IIIlIIIIII, 0x11, _lIIlllIIII.ElasticityWeight) _lIIIllIIlI.writef32(_IIIlIIIIII, 0x15, _lIIlllIIII.AcousticAbsorption) end
+ return _IIIlIIIIII, _lllIIIlIII end
+ , ["\082\101\103\105\111\110\051"] = function (_lIIlllIIII) local _lIlIIIlIlI = _lIIlllIIII.CFrame.Position local _llIIIIIllI = _lIIlllIIII.Size * 0.5 return _lIIIlIlIlI.__PACK_MULTIPLE( _lIIIlIlIlI["\086\101\099\116\111\114\051"], _lIlIIIlIlI - _llIIIIIllI, _lIlIIIlIlI + _llIIIIIllI ) end
+ , ["\082\101\103\105\111\110\051\105\110\116\049\054"] = function (_lIIlllIIII) return _lIIIlIlIlI.__PACK_MULTIPLE(_lIIIlIlIlI["\086\101\099\116\111\114\051\105\110\116\049\054"], _lIIlllIIII.Min, _lIIlllIIII.Max) end
+ , ["\070\111\110\116"] = 0x27C < _lIlIIIllll and function (_lIIlllIIII) local _lIIlIIIllI = _lIIIlIlIlI["\115\116\114\105\110\103"] local _lIlllIlIlI, Family_size = _lIIlIIIllI(_lIIlllIIII.Family) local _IIIIIllIll, CachedFaceId_size = _lIIlIIIllI("") local _lllIIIlIII = 0x3 + Family_size + CachedFaceId_size local _IIIlIIIIII = _lIIIllIIlI.create(_lllIIIlIII) local _IIIIIllllI, weight = pcall(_llllIlIlll, _lIIlllIIII, "\087\101\105\103\104\116") local _lIIIlIIllI, style = pcall(_llllIlIlll, _lIIlllIIII, "\083\116\121\108\101") _lIIIllIIlI.writeu16(_IIIlIIIIII, 0x0, _IIIIIllllI and weight.Value or 0x0) _lIIIllIIlI.writeu8(_IIIlIIIIII, 0x2, _lIIIlIIllI and style.Value or 0x0) _lIIIllIIlI.copy(_IIIlIIIIII, 0x3, _lIlllIlIlI) _lIIIllIIlI.copy(_IIIlIIIIII, 0x3 + Family_size, _IIIIIllIll) return _IIIlIIIIII, _lllIIIlIII end
+ or function (_lIIlllIIII) local _lIIlIIIllI = _lIIIlIlIlI["\115\116\114\105\110\103"] local _lIlllIlIlI, Family_size = _lIIlIIIllI(_lIIlllIIII.Family) local _IIIIIllIll, CachedFaceId_size = _lIIlIIIllI("") local _lllIIIlIII = 0x3 + Family_size + CachedFaceId_size local _IIIlIIIIII = _lIIIllIIlI.create(_lllIIIlIII) local _IIllIIIlll = tostring(_lIIlllIIII) local _IIIllIIlIl = _lIIlIlIIlI(_IIllIIIlll, "\087\101\105\103\104\116\032\061\032\044") local _IIllIIIlII = _lIIlIlIIlI(_IIllIIIlll, "\083\116\121\108\101\032\061\032\032\125") _lIIIllIIlI.writeu16(_IIIlIIIIII, 0x0, _IIIllIIlIl and 0x0 or _lIIlllIIII.Weight.Value) _lIIIllIIlI.writeu8(_IIIlIIIIII, 0x2, _IIllIIIlII and 0x0 or _lIIlllIIII.Style.Value) _lIIIllIIlI.copy(_IIIlIIIIII, 0x3, _lIlllIlIlI) _lIIIllIIlI.copy(_IIIlIIIIII, 0x3 + Family_size, _IIIIIllIll) return _IIIlIIIIII, _lllIIIlIII end
+ , ["\083\101\099\117\114\105\116\121\067\097\112\097\098\105\108\105\116\105\101\115"] = function (_lIIlllIIII) local _IIIlIIIIII = _lIIIllIIlI.create(0x8) if _lIIlllIIII == _IIIIIllIII then return _IIIlIIIIII, 0x8 end
+ _lIIIlIlIlI.__writei64(_IIIlIIIIII, 0x0, _lIIlIIIlII(_lIIlllIIII)) return _IIIlIIIIII, 0x8 end
+ , ["\080\097\116\104\050\068\067\111\110\116\114\111\108\080\111\105\110\116"] = function (_lIIlllIIII) return _lIIIlIlIlI.__PACK_MULTIPLE( _lIIIlIlIlI["\085\068\105\109\050"], _lIIlllIIII.Position, _lIIlllIIII.LeftTangent, _lIIlllIIII.RightTangent ) end
+ , } do _lIIIlIlIlI["\078\117\109\098\101\114\083\101\113\117\101\110\099\101"] = _lIIIlIlIlI.__construct_Sequence(_lIIIlIlIlI["\078\117\109\098\101\114\083\101\113\117\101\110\099\101\075\101\121\112\111\105\110\116"], 0xC) _lIIIlIlIlI["\067\111\108\111\114\083\101\113\117\101\110\099\101"] = _lIIIlIlIlI.__construct_Sequence(_lIIIlIlIlI["\067\111\108\111\114\083\101\113\117\101\110\099\101\075\101\121\112\111\105\110\116"], 0x14) end
+ do _lIIIlIlIlI.__PACK_F32 = _lIIIlIlIlI.__construct__PACKER(true) _lIIIlIlIlI.__PACK_I16 = _lIIIlIlIlI.__construct__PACKER() end
+ local _llIllllIIl = "\091\038\060\062\092\034\039\092\048\092\049\045\092\057\092\049\049\045\092\049\050\092\049\052\045\092\051\049\092\049\050\055\045\092\050\053\053\093" local _IIIlllIlII = { ["\038"] = "\038\097\109\112\059", ["\060"] = "\038\108\116\059", ["\062"] = "\038\103\116\059", ["\034"] = "\038\035\051\052\059", ["\039"] = "\038\035\051\057\059", ["\092\048"] = "", } for rangeStart, rangeEnd in string.gmatch(_llIllllIIl, "\040\046\041\037\045\040\046\041") do for charCode = string.byte(rangeStart), string.byte(rangeEnd) do _IIIlllIlII[string.char(charCode)] = "\038\035" .. charCode .. "\059" end
+ end
+ local _llIIlllIll _llIIlllIll = { __CDATA = function (_lIIlllIIII) return "\060\033\091\067\068\065\084\065\091" .. _lIIlllIIII .. "\093\093\062" end
+ , _IIIIIIIIll = function (_lIIlllIIII) if _lIIlllIIII ~= _lIIlllIIII then return "\078\065\078" elseif _lIIlllIIII == math.huge then return "\073\078\070" elseif _lIIlllIIII == -math.huge then return "\045\073\078\070" end
+ return _lIIlllIIII end
+ , _IlIlIIIIII = function (_lIIlllIIII) return _lIIlllIIII ~= _lIIlllIIII and "\048" or _lIIlllIIII end
+ , __MINMAX = function (min, max, descriptor) return "\060\109\105\110\062" .. descriptor(min) .. "\060\047\109\105\110\062\060\109\097\120\062" .. descriptor(max) .. "\060\047\109\097\120\062" end
+ , __PROTECTEDSTRING = function (_lIIlllIIII) return _lIIlIlIIlI(_lIIlllIIII, "\093\093\062") and string.gsub(_lIIlllIIII, _llIllllIIl, _IIIlllIlII) or _llIIlllIll.__CDATA(_lIIlllIIII) end
+ , __construct_Sequence = function (keypoint_handler) return function (_lIIlllIIII) local _IIIIlIIlll = "" for _, keypoint in _lIIlllIIII.Keypoints do _IIIIlIIlll ..= keypoint_handler(keypoint) end
+ return _IIIIlIIlll end
+ end
+ , __VECTOR = function (_IlIIIlllII, Y, Z) local _IIllllllII = "\060\088\062" .. _IlIIIlllII .. "\060\047\088\062\060\089\062" .. Y .. "\060\047\089\062" if Z then _IIllllllII ..= "\060\090\062" .. Z .. "\060\047\090\062" end
+ return _IIllllllII end
+ , Axes = function (_lIIlllIIII) return "\060\097\120\101\115\062" .. _IIIlllIIlI(_lIIlllIIII.X, _lIIlllIIII.Y, _lIIlllIIII.Z) .. "\060\047\097\120\101\115\062" end
+ , BinaryString = function (_lIIlllIIII) return _lIIlllIIII == "" and "" or _lIlIllllll(_lIIlllIIII) end
+ , BrickColor = function (_lIIlllIIII) return _lIIlllIIII.Number end
+ , CFrame = function (_lIIlllIIII) local _IlIIIlllII, Y, Z, R00, R01, R02, R10, R11, R12, R20, R21, R22 = _lIIlllIIII:GetComponents() return _llIIlllIll.__VECTOR(_IlIIIlllII, Y, Z) .. "\060\082\048\048\062" .. R00 .. "\060\047\082\048\048\062\060\082\048\049\062" .. R01 .. "\060\047\082\048\049\062\060\082\048\050\062" .. R02 .. "\060\047\082\048\050\062\060\082\049\048\062" .. R10 .. "\060\047\082\049\048\062\060\082\049\049\062" .. R11 .. "\060\047\082\049\049\062\060\082\049\050\062" .. R12 .. "\060\047\082\049\050\062\060\082\050\048\062" .. R20 .. "\060\047\082\050\048\062\060\082\050\049\062" .. R21 .. "\060\047\082\050\049\062\060\082\050\050\062" .. R22 .. "\060\047\082\050\050\062", "\067\111\111\114\100\105\110\097\116\101\070\114\097\109\101" end
+ , Color3 = function (_lIIlllIIII) return "\060\082\062" .. _lIIlllIIII.R .. "\060\047\082\062\060\071\062" .. _lIIlllIIII.G .. "\060\047\071\062\060\066\062" .. _lIIlllIIII.B .. "\060\047\066\062" end
+ , Color3uint8 = function (_lIIlllIIII) return 0xFF000000 + (math.floor(_lIIlllIIII.R * 0xFF) * 0x10000) + (math.floor(_lIIlllIIII.G * 0xFF) * 0x100) + math.floor(_lIIlllIIII.B * 0xFF) end
+ , ColorSequence = nil, ColorSequenceKeypoint = function (keypoint) local _IlIlIIIIII = _llIIlllIll.__NORMALIZE_RANGE local _llIIIlIIII = keypoint.Value return _IlIlIIIIII(keypoint.Time) .. "\032" .. _IlIlIIIIII(_llIIIlIIII.R) .. "\032" .. _IlIlIIIIII(_llIIIlIIII.G) .. "\032" .. _IlIlIIIIII(_llIIIlIIII.B) .. "\032\048\032" end
+ , Content = function (_lIIlllIIII) local _IllIllllll = _lIIlllIIII.SourceType return _IllIllllll == Enum.ContentSourceType.None and "\060\110\117\108\108\062\060\047\110\117\108\108\062" or _IllIllllll == Enum.ContentSourceType.Uri and "\060\117\114\105\062" .. _llIIlllIll.string(_lIIlllIIII.Uri) .. "\060\047\117\114\105\062" or _IllIllllll == Enum.ContentSourceType.Object and "\060\082\101\102\062" .. _IIlIIlIIll(_lIIlllIIII.Object) .. "\060\047\082\101\102\062" or _IllIllllll == Enum.ContentSourceType.Opaque and "\060\082\101\102\062" .. _IIlIIlIIll(_lIIlllIIII.Opaque) .. "\060\047\082\101\102\062" end
+ , ContentId = function (_lIIlllIIII) return _lIIlllIIII == "" and "\060\110\117\108\108\062\060\047\110\117\108\108\062" or "\060\117\114\108\062" .. _llIIlllIll.string(_lIIlllIIII) .. "\060\047\117\114\108\062", "\067\111\110\116\101\110\116" end
+ , CoordinateFrame = function (_lIIlllIIII) return "\060\067\070\114\097\109\101\062" .. _llIIlllIll.CFrame(_lIIlllIIII) .. "\060\047\067\070\114\097\109\101\062" end
+ , _IlIllIllll = function (_lIIlllIIII) return _lIIlllIIII.Value, "\116\111\107\101\110" end
+ , Faces = function (_lIIlllIIII) return "\060\102\097\099\101\115\062" .. _IIIlllIIlI(_lIIlllIIII.Right, _lIIlllIIII.Top, _lIIlllIIII.Back, _lIIlllIIII.Left, _lIIlllIIII.Bottom, _lIIlllIIII.Front) .. "\060\047\102\097\099\101\115\062" end
+ , Font = 0x27C < _lIlIIIllll and function (_lIIlllIIII) local _IIIIIllllI, weight = pcall(_llllIlIlll, _lIIlllIIII, "\087\101\105\103\104\116") local _lIIIlIIllI, style = pcall(_llllIlIlll, _lIIlllIIII, "\083\116\121\108\101") return "\060\070\097\109\105\108\121\062" .. _llIIlllIll.ContentId(_lIIlllIIII.Family) .. "\060\047\070\097\109\105\108\121\062\060\087\101\105\103\104\116\062" .. (_IIIIIllllI and _llIIlllIll.EnumItem(weight) or "") .. "\060\047\087\101\105\103\104\116\062\060\083\116\121\108\101\062" .. (_lIIIlIIllI and style.Name or "") .. "\060\047\083\116\121\108\101\062" end
+ or function (_lIIlllIIII) local _IIllIIIlll = tostring(_lIIlllIIII) local _IIIllIIlIl = _lIIlIlIIlI(_IIllIIIlll, "\087\101\105\103\104\116\032\061\032\044") local _IIllIIIlII = _lIIlIlIIlI(_IIllIIIlll, "\083\116\121\108\101\032\061\032\032\125") return "\060\070\097\109\105\108\121\062" .. _llIIlllIll.ContentId(_lIIlllIIII.Family) .. "\060\047\070\097\109\105\108\121\062\060\087\101\105\103\104\116\062" .. (_IIIllIIlIl and "" or _llIIlllIll.EnumItem(_lIIlllIIII.Weight)) .. "\060\047\087\101\105\103\104\116\062\060\083\116\121\108\101\062" .. (_IIllIIIlII and "" or _lIIlllIIII.Style.Name) .. "\060\047\083\116\121\108\101\062" end
+ , NetAssetRef = nil, NumberRange = function (_lIIlllIIII) local _IlIlIIIIII = _llIIlllIll.__NORMALIZE_RANGE return _IlIlIIIIII(_lIIlllIIII.Min) .. "\032" .. _IlIlIIIIII(_lIIlllIIII.Max) end
+ , NumberSequence = nil, NumberSequenceKeypoint = function (keypoint) local _IlIlIIIIII = _llIIlllIll.__NORMALIZE_RANGE return _IlIlIIIIII(keypoint.Time) .. "\032" .. _IlIlIIIIII(keypoint.Value) .. "\032" .. _IlIlIIIIII(keypoint.Envelope) .. "\032" end
+ , PhysicalProperties = function (_lIIlllIIII) local _IIlIllllll = "\060\067\117\115\116\111\109\080\104\121\115\105\099\115\062" .. _llIIlllIll.bool(_lIIlllIIII and true or false) .. "\060\047\067\117\115\116\111\109\080\104\121\115\105\099\115\062" return _lIIlllIIII and _IIlIllllll .. "\060\068\101\110\115\105\116\121\062" .. _lIIlllIIII.Density .. "\060\047\068\101\110\115\105\116\121\062\060\070\114\105\099\116\105\111\110\062" .. _lIIlllIIII.Friction .. "\060\047\070\114\105\099\116\105\111\110\062\060\069\108\097\115\116\105\099\105\116\121\062" .. _lIIlllIIII.Elasticity .. "\060\047\069\108\097\115\116\105\099\105\116\121\062\060\070\114\105\099\116\105\111\110\087\101\105\103\104\116\062" .. _lIIlllIIII.FrictionWeight .. "\060\047\070\114\105\099\116\105\111\110\087\101\105\103\104\116\062\060\069\108\097\115\116\105\099\105\116\121\087\101\105\103\104\116\062" .. _lIIlllIIII.ElasticityWeight .. "\060\047\069\108\097\115\116\105\099\105\116\121\087\101\105\103\104\116\062\060\065\099\111\117\115\116\105\099\065\098\115\111\114\112\116\105\111\110\062" .. _lIIlllIIII.AcousticAbsorption .. "\060\047\065\099\111\117\115\116\105\099\065\098\115\111\114\112\116\105\111\110\062" or _IIlIllllll end
+ , Ray = function (_lIIlllIIII) local _IIlIlllIIl = _llIIlllIll.Vector3 return "\060\111\114\105\103\105\110\062" .. _IIlIlllIIl(_lIIlllIIII.Origin) .. "\060\047\111\114\105\103\105\110\062\060\100\105\114\101\099\116\105\111\110\062" .. _IIlIlllIIl(_lIIlllIIII.Direction) .. "\060\047\100\105\114\101\099\116\105\111\110\062" end
+ , Rect = function (_lIIlllIIII) return _llIIlllIll.__MINMAX(_lIIlllIIII.Min, _lIIlllIIII.Max, _llIIlllIll.Vector2), "\082\101\099\116\050\068" end
+ , Region3 = function (_lIIlllIIII) local _lIlIIIlIlI = _lIIlllIIII.CFrame.Position local _llIIIIIllI = _lIIlllIIII.Size * 0.5 return _llIIlllIll.__MINMAX( _lIlIIIlIlI - _llIIIIIllI, _lIlIIIlIlI + _llIIIIIllI, _llIIlllIll.Vector3 ) end
+ , Region3int16 = function (_lIIlllIIII) return _llIIlllIll.__MINMAX(_lIIlllIIII.Min, _lIIlllIIII.Max, _llIIlllIll.Vector3int16) end
+ , SharedString = function (_lIIlllIIII) _lIIlllIIII = _lIIlllIIII == "" and "" or _lIlIllllll(_lIIlllIIII) local _IllIlllllI = _lIIIlIIIll[_lIIlllIIII] if _lIIllIIllI[_IllIlllllI] == nil then _lIIllIIllI[_IllIlllllI] = _lIIlllIIII end
+ return _IllIlllllI end
+ , SecurityCapabilities = function (_lIIlllIIII) if _lIIlllIIII == _IIIIIllIII then return 0x0 end
+ return _lIIlIIIlII(_lIIlllIIII) end
+ , UDim = function (_lIIlllIIII) return "\060\083\062" .. _lIIlllIIII.Scale .. "\060\047\083\062\060\079\062" .. _lIIlllIIII.Offset .. "\060\047\079\062" end
+ , UDim2 = function (_lIIlllIIII) local _IlIIIlllII, Y = _lIIlllIIII.X, _lIIlllIIII.Y return "\060\088\083\062" .. _IlIIIlllII.Scale .. "\060\047\088\083\062\060\088\079\062" .. _IlIIIlllII.Offset .. "\060\047\088\079\062\060\089\083\062" .. Y.Scale .. "\060\047\089\083\062\060\089\079\062" .. Y.Offset .. "\060\047\089\079\062" end
+ , Vector2 = function (_lIIlllIIII) return _llIIlllIll.__VECTOR(_lIIlllIIII.X, _lIIlllIIII.Y) end
+ , Vector2int16 = nil, Vector3 = function (_lIIlllIIII) return _llIIlllIll.__VECTOR(_lIIlllIIII.X, _lIIlllIIII.Y, _lIIlllIIII.Z) end
+ , Vector3int16 = nil, bool = function (_lIIlllIIII) return _lIIlllIIII and "\116\114\117\101" or "\102\097\108\115\101" end
+ , double = nil, float = nil, int = nil, int64 = nil, string = function (_lIIlllIIII) return (_lIIlllIIII == nil or _lIIlllIIII == "") and "" or _lIIlIlIIlI(_lIIlllIIII, "\093\093\062") and string.gsub(_lIIlllIIII, _llIllllIIl, _IIIlllIlII) or _llIIlllIll.__CDATA(string.gsub(_lIIlllIIII, "\092\048", "")) end
+ , } do _llIIlllIll.NumberSequence = _llIIlllIll.__construct_Sequence(_llIIlllIll.NumberSequenceKeypoint) _llIIlllIll.ColorSequence = _llIIlllIll.__construct_Sequence(_llIIlllIll.ColorSequenceKeypoint) end
+ for descriptorName, redirectName in { NetAssetRef = "\083\104\097\114\101\100\083\116\114\105\110\103", Vector2int16 = "\086\101\099\116\111\114\050", Vector3int16 = "\086\101\099\116\111\114\051", double = "\095\095\078\079\082\077\065\076\073\090\069\095\078\085\077\066\069\082", float = "\095\095\078\079\082\077\065\076\073\090\069\095\078\085\077\066\069\082", int = "\095\095\078\079\082\077\065\076\073\090\069\095\078\085\077\066\069\082", int64 = "\095\095\078\079\082\077\065\076\073\090\069\095\078\085\077\066\069\082", } do _llIIlllIll[descriptorName] = _llIIlllIll[redirectName] end
+ if _lIlIIIllll < math.huge then _llIIlllIll.Content = _llIIlllIll.ContentId end
+ local _lIlIlIlIII do local _IIlIlllIll = { Whitelist = { MeshPart = _lIIIllIlII({ "\067\111\108\108\105\115\105\111\110\070\105\100\101\108\105\116\121" }), PartOperation = _lIIIllIlII({ "\067\111\108\108\105\115\105\111\110\070\105\100\101\108\105\116\121" }), TriangleMeshPart = _lIIIllIlII({ "\067\111\108\108\105\115\105\111\110\070\105\100\101\108\105\116\121" }), }, Blacklist = { LuaSourceContainer = _lIIIllIlII({ "\083\099\114\105\112\116\071\117\105\100" }), Instance = _lIIIllIlII({ "\085\110\105\113\117\101\073\100", "\072\105\115\116\111\114\121\073\100" }), }, } local function _lIlIIIlIIl(_lIllllIIII) local _lllIlIlllI = 0x0 local _lllIIIIIll = 0x4 local _IIIIIlllIl = {} local _lIIlllIlII = table.clone(_lIllllIIII) for attr, val in _lIllllIIII do _lllIlIlllI += 0x1 _IIIIIlllIl[_lllIlIlllI] = attr local _IIlIIIllll = typeof(val) local _lIllIIIllI = _lIIIlIlIlI[_IIlIIIllll] local _lIlIllIIIl _lIIlllIlII[attr], _lIlIllIIIl = _lIllIIIllI(val) _lllIIIIIll += 0x5 + #attr + _lIlIllIIIl end
+ table.sort(_IIIIIlllIl) local _IIIlIIIIII = _lIIIllIIlI.create(_lllIIIIIll) _lIIIllIIlI.writeu32(_IIIlIIIIII, 0x0, _lllIlIlllI) local _lIIlIIIllI = _lIIIlIlIlI["\115\116\114\105\110\103"] local _IlIlIIllII = 0x4 for _, attr in _IIIIIlllIl do local _IIllllIIll, Name_size = _lIIlIIIllI(attr) _lIIIllIIlI.copy(_IIIlIIIIII, _IlIlIIllII, _IIllllIIll) _IlIlIIllII += Name_size _lIIIllIIlI.writeu8(_IIIlIIIIII, _IlIlIIllII, _lllllIIIIl[typeof(_lIllllIIII[attr])]) _IlIlIIllII += 0x1 local _llllIIllIl = _lIIlllIlII[attr] _lIIIllIIlI.copy(_IIIlIIIIII, _IlIlIIllII, _llllIIllIl) _IlIlIIllII += _lIIIllIIlI.len(_llllIIllIl) end
+ return _lIIIllIIlI.tostring(_IIIlIIIIII) end
+ local function _IIllllllll(attenuations) if not next(attenuations) then return "\092\048" end
+ local _IllIIlIIlI = 0x0 local _lllIIIllll = {} for key in attenuations do _IllIIlIIlI += 0x1 _lllIIIllll[_IllIIlIIlI] = key end
+ table.sort(_lllIIIllll) local _IIIlIIIIII = _lIIIllIIlI.create(0x1 + _IllIIlIIlI * 0x8) local _IlIlIIllII = 0x1 for _, key in _lllIIIllll do _lIIIllIIlI.writef32(_IIIlIIIIII, _IlIlIIllII, key) _IlIlIIllII += 0x4 _lIIIllIIlI.writef32(_IIIlIIIIII, _IlIlIIllII, attenuations[key]) _IlIlIIllII += 0x4 end
+ return _lIIIllIIlI.tostring(_IIIlIIIIII) end
+ local function _lIIlllIIll(transforms) local _IIIIIIlllI = #transforms if _IIIIIIlllI == 0x0 then return "\092\049\092\048\092\048\092\048\092\048\092\048\092\048\092\048" end
+ local _IIIlIIIIII = _lIIIllIIlI.create(0x8 + _IIIIIIlllI * 0x30) _lIIIllIIlI.writeu32(_IIIlIIIIII, 0x0, 0x1) _lIIIllIIlI.writeu32(_IIIlIIIIII, 0x4, _IIIIIIlllI) local _IIIllIIllI = _lIIIlIlIlI.__PACK_F32 local _IlIlIIllII = 0x8 for _, transform in transforms do local _IlIIIlllII, Y, Z, R00, R01, R02, R10, R11, R12, R20, R21, R22 = transform:GetComponents() local _lIlIIIIIII = _IIIllIIllI(R00, R01, R02) _lIIIllIIlI.copy(_IIIlIIIIII, _IlIlIIllII, _lIlIIIIIII) _IlIlIIllII += 0xC local _IllIlIIlII = _IIIllIIllI(R10, R11, R12) _lIIIllIIlI.copy(_IIIlIIIIII, _IlIlIIllII, _IllIlIIlII) _IlIlIIllII += 0xC local _llIIIlllII = _IIIllIIllI(R20, R21, R22) _lIIIllIIlI.copy(_IIIlIIIIII, _IlIlIIllII, _llIIIlllII) _IlIlIIllII += 0xC local _IlIlIlIIII = _IIIllIIllI(_IlIIIlllII, Y, Z) _lIIIllIIlI.copy(_IIIlIIIIII, _IlIlIIllII, _IlIlIlIIII) _IlIlIIllII += 0xC end
+ return _lIIIllIIlI.tostring(_IIIlIIIIII) end
+ local _lIlIlIIIIl = { Instance = { _lIlIIIlIIl = function (instance) local _lIllllIIII = instance:GetAttributes() if not next(_lIllllIIII) then return "" end
+ return _lIlIIIlIIl(_lIllllIIII) end
+ , DefinesCapabilities = "\083\097\110\100\098\111\120\101\100", _IlllIlIllI = function (instance) local _IllIIlIIII = _llIlllIIll.CollectionService:GetTags(instance) if #_IllIIlIIII == 0x0 then return "" end
+ return table.concat(_IllIIlIIII, "\092\048") end
+ , }, Path2D = { PropertiesSerialize = function (instance) local _llIlIIIIIl = instance:GetControlPoints() local _IIlllIIllI = #_llIlIIIIIl if _IIlllIIllI == 0x0 then return "\092\048\092\048\092\048\092\048" end
+ local _IIIlIIIIII = _lIIIllIIlI.create(0x4 + _IIlllIIllI * 0x31) _lIIIllIIlI.writeu32(_IIIlIIIIII, 0x0, _IIlllIIllI) local _lllIIlIIII = _lllllIIIIl["\080\097\116\104\050\068\067\111\110\116\114\111\108\080\111\105\110\116"] local _IIlIlIlIIl = _lIIIlIlIlI["\080\097\116\104\050\068\067\111\110\116\114\111\108\080\111\105\110\116"] local _IlIlIIllII = 0x4 for i, point in _llIlIIIIIl do local _IlIlllIIII = _IIlIlIlIIl(point) _lIIIllIIlI.writeu8(_IIIlIIIIII, _IlIlIIllII, _lllIIlIIII) _IlIlIIllII += 0x1 _lIIIllIIlI.copy(_IIIlIIIIII, _IlIlIIllII, _IlIlllIIII) _IlIlIIllII += 0x30 end
+ return _lIIIllIIlI.tostring(_IIIlIIIIII) end
+ , }, PlayerEmulatorService = { SerializedEmulatedPolicyInfo = function (instance) local _llIlIlIllI = instance:GetEmulatedPolicyInfo() if not next(_llIlIlIllI) then return "" end
+ return _lIlIIIlIIl(_llIlIlIllI) end
+ , }, StyleRule = { PropertiesSerialize = function (instance) local _IIllIllIII = instance:GetProperties() if not next(_IIllIllIII) then return "\092\048\092\048\092\048\092\048" end
+ return _lIlIIIlIIl(_IIllIllIII) end
+ , }, StyleQuery = { ConditionsSerialize = function (instance) local _IIllIllIII = instance:GetConditions() if not next(_IIllIllIII) then return "\092\048\092\048\092\048\092\048" end
+ return _lIlIIIlIIl(_IIllIllIII) end
+ , }, MarkerCurve = { ValuesAndTimes = function (instance) local _llIIlIlIIl = instance:GetMarkers() local _IIlIIllIll = #_llIIlIlIIl if _IIlIIllIll == 0x0 then return "\092\050\092\048\092\048\092\048\092\048\092\048\092\048\092\048\092\049\092\048\092\048\092\048\092\048\092\048\092\048\092\048" end
+ local _lIIIIlIIII = 0x0 for i, marker in _llIIlIlIIl do _lIIIIlIIII += #marker.Value + 0x1 end
+ local _IIIlIIIIII = _lIIIllIIlI.create(0x8 + _lIIIIlIIII + 0x8 + (_IIlIIllIll * 0x4)) _lIIIllIIlI.writeu32(_IIIlIIIIII, 0x0, 0x2) _lIIIllIIlI.writeu32(_IIIlIIIIII, 0x4, _IIlIIllIll) local _IlIlIIllII = 0x8 for i, marker in _llIIlIlIIl do local _lIlllIIIIl = marker.Value _lIIIllIIlI.writestring(_IIIlIIIIII, _IlIlIIllII, _lIlllIIIIl) _IlIlIIllII += #_lIlllIIIIl + 0x1 end
+ _lIIIllIIlI.writeu32(_IIIlIIIIII, _IlIlIIllII, 0x1) _IlIlIIllII += 0x4 _lIIIllIIlI.writeu32(_IIIlIIIIII, _IlIlIIllII, _IIlIIllIll) _IlIlIIllII += 0x4 for i, marker in _llIIlIlIIl do local _lIIllIIlIl = math.round(marker.Time * 0x960) _lIIIllIIlI.writeu32(_IIIlIIIIII, _IlIlIIllII, _lIIllIIlIl) _IlIlIIllII += 0x4 end
+ return _lIIIllIIlI.tostring(_IIIlIIIIII) end
+ , }, AnimationNodeDefinition = { InputPinData = function (instance) local _IIllIlIlII = instance:GetInputPins() local _IlIlIlIIll = #_IIllIlIlII if _IlIlIlIIll == 0x0 then return "\092\049\092\048\092\048\092\048\092\048\092\048\092\048\092\048" end
+ local _lllIIIIIll = 0x8 for _, pin in _IIllIlIlII do _lllIIIIIll += 0x4 + #pin end
+ local _IIIlIIIIII = _lIIIllIIlI.create(_lllIIIIIll) _lIIIllIIlI.writeu32(_IIIlIIIIII, 0x0, 0x1) _lIIIllIIlI.writeu32(_IIIlIIIIII, 0x4, _IlIlIlIIll) local _lIIlIIIllI = _lIIIlIlIlI["\115\116\114\105\110\103"] local _IlIlIIllII = 0x8 for _, pin in _IIllIlIlII do local _lllIIIlIII, pin_size = _lIIlIIIllI(pin) _lIIIllIIlI.copy(_IIIlIIIIII, _IlIlIIllII, _lllIIIlIII) _IlIlIIllII += pin_size end
+ return _lIIIllIIlI.tostring(_IIIlIIIIII) end
+ , }, AnimationRigData = { label = function (instance) local _IllIllIlII = instance:GetLabels() local _lIllIIIlll = #_IllIllIlII if _lIllIIIlll == 0x0 then return "\092\049\092\048\092\048\092\048\092\048\092\048\092\048\092\048" end
+ local _IIIlIIIIII = _lIIIllIIlI.create(0x8 + _lIllIIIlll * 0x4) _lIIIllIIlI.writeu32(_IIIlIIIIII, 0x0, 0x1) _lIIIllIIlI.writeu32(_IIIlIIIIII, 0x4, _lIllIIIlll) local _IlIlIIllII = 0x8 for _, label in _IllIllIlII do _lIIIllIIlI.writeu32(_IIIlIIIIII, _IlIlIIllII, label) _IlIlIIllII += 0x4 end
+ return _lIIIllIIlI.tostring(_IIIlIIIIII) end
+ , _lIllIIlIll = function (instance) local _lIIIllIIll = instance:GetNames() local _IIIIlIIlll = #_lIIIllIIll if _IIIIlIIlll == 0x0 then return "\092\049\092\048\092\048\092\048\092\048\092\048\092\048\092\048" end
+ local _lllIIIIIll = 0x8 for _, _lIllIIlIll in _lIIIllIIll do _lllIIIIIll += 0x4 + #_lIllIIlIll end
+ local _IIIlIIIIII = _lIIIllIIlI.create(_lllIIIIIll) _lIIIllIIlI.writeu32(_IIIlIIIIII, 0x0, 0x1) _lIIIllIIlI.writeu32(_IIIlIIIIII, 0x4, _IIIIlIIlll) local _IlIlIIllII = 0x8 for _, _lIllIIlIll in _lIIIllIIll do _lIIIllIIlI.writeu32(_IIIlIIIIII, _IlIlIIllII, #_lIllIIlIll) _IlIlIIllII += 0x4 end
+ for _, _lIllIIlIll in _lIIIllIIll do _lIIIllIIlI.writestring(_IIIlIIIIII, _IlIlIIllII, _lIllIIlIll) _IlIlIIllII += #_lIllIIlIll end
+ return _lIIIllIIlI.tostring(_IIIlIIIIII) end
+ , parent = function (instance) local _IIllllIlIl = instance:GetParents() local _lIIlIlIIIl = #_IIllllIlIl if _lIIlIlIIIl == 0x0 then return "\092\049\092\048\092\048\092\048\092\048\092\048\092\048\092\048" end
+ local _IIIlIIIIII = _lIIIllIIlI.create(0x8 + #_IIllllIlIl * 0x2) _lIIIllIIlI.writeu32(_IIIlIIIIII, 0x0, 0x1) _lIIIllIIlI.writeu32(_IIIlIIIIII, 0x4, _lIIlIlIIIl) local _IlIlIIllII = 0x8 for _, parent in _IIllllIlIl do _lIIIllIIlI.writeu16(_IIIlIIIIII, _IlIlIIllII, parent) _IlIlIIllII += 0x2 end
+ return _lIIIllIIlI.tostring(_IIIlIIIIII) end
+ , postTransform = function (instance) return _lIIlllIIll(instance:GetPostTransforms()) end
+ , preTransform = function (instance) return _lIIlllIIll(instance:GetPreTransforms()) end
+ , transform = function (instance) return _lIIlllIIll(instance:GetTransforms()) end
+ , }, AudioDeviceInput = { AccessList = function (instance) local _lIllIlIIIl = instance:GetUserIdAccessList() local _lIllllIllI = #_lIllIlIIIl if _lIllllIllI == 0x0 then return "" end
+ local _IIIlIIIIII = _lIIIllIIlI.create(_lIllllIllI * 0x8) local _llIllIIlll = _lIIIlIlIlI.__writei64 local _IlIlIIllII = 0x0 for _, user_id in _lIllIlIIIl do _llIllIIlll(_IIIlIIIIII, _IlIlIIllII, user_id) _IlIlIIllII += 0x8 end
+ return _lIIIllIIlI.tostring(_IIIlIIIIII) end
+ , }, AudioEmitter = { AngleAttenuation = function (instance) return _IIllllllll(instance:GetAngleAttenuation()) end
+ , DistanceAttenuation = function (instance) return _IIllllllll(instance:GetDistanceAttenuation()) end
+ , }, AudioListener = { AngleAttenuation = function (instance) return _IIllllllll(instance:GetAngleAttenuation()) end
+ , DistanceAttenuation = function (instance) return _IIllllllll(instance:GetDistanceAttenuation()) end
+ , }, BallSocketConstraint = { MaxFrictionTorqueXml = "\077\097\120\070\114\105\099\116\105\111\110\084\111\114\113\117\101" }, BasePart = { Color3uint8 = "\067\111\108\111\114", MaterialVariantSerialized = "\077\097\116\101\114\105\097\108\086\097\114\105\097\110\116", _IIIIllIlIl = "\083\105\122\101", }, DoubleConstrainedValue = { _lIlllIIIIl = "\086\097\108\117\101" }, IntConstrainedValue = { _lIlllIIIIl = "\086\097\108\117\101" }, Terrain = { AcquisitionMethod = "\076\097\115\116\085\115\101\100\077\111\100\105\102\105\099\097\116\105\111\110\077\101\116\104\111\100", MaterialColors = function (instance) local _lllIIIIlII = { Enum.Material.Grass, Enum.Material.Slate, Enum.Material.Concrete, Enum.Material.Brick, Enum.Material.Sand, Enum.Material.WoodPlanks, Enum.Material.Rock, Enum.Material.Glacier, Enum.Material.Snow, Enum.Material.Sandstone, Enum.Material.Mud, Enum.Material.Basalt, Enum.Material.Ground, Enum.Material.CrackedLava, Enum.Material.Asphalt, Enum.Material.Cobblestone, Enum.Material.Ice, Enum.Material.LeafyGrass, Enum.Material.Salt, Enum.Material.Limestone, Enum.Material.Pavement, } local _IIIlIIIIII = _lIIIllIIlI.create(0x45) local _IlIlIIllII = 0x6 local _llllIIIIll = { "\082", "\071", "\066" } for _, material in _lllIIIIlII do local _IlIIIlIlII = instance:GetMaterialColor(material) for _, component in _llllIIIIll do _lIIIllIIlI.writeu8(_IIIlIIIIII, _IlIlIIllII, math.floor(_IlIIIlIlII[component] * 0xFF)) _IlIlIIllII += 0x1 end
+ end
+ return _lIIIllIIlI.tostring(_IIIlIIIIII) end
+ , }, TriangleMeshPart = { FluidFidelityInternal = "\070\108\117\105\100\070\105\100\101\108\105\116\121", }, MeshPart = { InitialSize = "\077\101\115\104\083\105\122\101" }, PartOperation = { InitialSize = "\077\101\115\104\083\105\122\101" }, Part = { shape = "\083\104\097\112\101" }, TrussPart = { style = "\083\116\121\108\101" }, FormFactorPart = { formFactorRaw = "\070\111\114\109\070\097\099\116\111\114", }, Fire = { heat_xml = "\072\101\097\116", size_xml = "\083\105\122\101" }, Humanoid = { Health_XML = "\072\101\097\108\116\104" }, HumanoidDescription = { EmotesDataInternal = function (instance) local _llIllIllIl = "" for _lIllIIlIll, ids in instance:GetEmotes() do _llIllIllIl ..= _lIllIIlIll .. "\094" .. table.concat(ids, "\094") .. "\094\092\092" end
+ return _llIllIllIl end
+ , EquippedEmotesDataInternal = function (instance) local _llllllllIl = "" for _, emote in instance:GetEquippedEmotes() do _llllllllIl ..= emote.Slot .. "\094" .. emote.Name .. "\092\092" end
+ return _llllllllIl end
+ , }, LocalizationTable = { Contents = function (instance) return instance:GetContents() end
+ , }, MaterialService = { Use2022MaterialsXml = "\085\115\101\050\048\050\050\077\097\116\101\114\105\097\108\115" }, Model = { ScaleFactor = function (instance) return instance:GetScale() end
+ , WorldPivotData = "\087\111\114\108\100\080\105\118\111\116", }, PackageLink = { PackageIdSerialize = "\080\097\099\107\097\103\101\073\100", VersionIdSerialize = "\086\101\114\115\105\111\110\078\117\109\098\101\114" }, Players = { MaxPlayersInternal = "\077\097\120\080\108\097\121\101\114\115", PreferredPlayersInternal = "\080\114\101\102\101\114\114\101\100\080\108\097\121\101\114\115" }, StarterPlayer = { AvatarJointUpgrade_Serialized = "\065\118\097\116\097\114\074\111\105\110\116\085\112\103\114\097\100\101" }, Smoke = { size_xml = "\083\105\122\101", opacity_xml = "\079\112\097\099\105\116\121", riseVelocity_xml = "\082\105\115\101\086\101\108\111\099\105\116\121" }, Sound = { xmlRead_MaxDistance_3 = "\082\111\108\108\079\102\102\077\097\120\068\105\115\116\097\110\099\101", }, WeldConstraint = { Part0Internal = "\080\097\114\116\048", Part1Internal = "\080\097\114\116\049", }, Workspace = { CollisionGroupData = function () local _IIIIllIllI = game:GetService("\080\104\121\115\105\099\115\083\101\114\118\105\099\101"):GetRegisteredCollisionGroups() local _IllIIlIlIl = #_IIIIllIllI if _IllIIlIlIl == 0x0 then return "\092\049\092\048" end
+ local _lllIIIIIll = 0x2 for _, group in _IIIIllIllI do _lllIIIIIll += 0x7 + #group.name end
+ local _IIIlIIIIII = _lIIIllIIlI.create(_lllIIIIIll) _lIIIllIIlI.writeu8(_IIIlIIIIII, 0x0, 0x1) _lIIIllIIlI.writeu8(_IIIlIIIIII, 0x1, _IllIIlIlIl) local _lIllIIIlIl = _lllllIIIIl["\105\110\116\051\050"] local _IlIlIIllII = 0x2 for i, group in _IIIIllIllI do local _lIllIIlIll, id, mask = group.name, i - 0x1, group.mask local _IIIllIIllI = #_lIllIIlIll _lIIIllIIlI.writeu8(_IIIlIIIIII, _IlIlIIllII, id) _IlIlIIllII += 0x1 _lIIIllIIlI.writeu8(_IIIlIIIIII, _IlIlIIllII, _lIllIIIlIl) _IlIlIIllII += 0x1 _lIIIllIIlI.writei32(_IIIlIIIIII, _IlIlIIllII, mask) _IlIlIIllII += 0x4 _lIIIllIIlI.writeu8(_IIIlIIIIII, _IlIlIIllII, _IIIllIIllI) _IlIlIIllII += 0x1 _lIIIllIIlI.writestring(_IIIlIIIIII, _IlIlIIllII, _lIllIIlIll) _IlIlIIllII += _IIIllIIllI end
+ return _lIIIllIIlI.tostring(_IIIlIIIIII) end
+ , }, } local function _llIllIlIII() local _lIIIIIlIlI local _IlIIIIllII, err = pcall( function () if _lIlIIIIIIl == "\086\101\108\111\099\105\116\121" then return end
+ local _IlIIIIIlIl = tostring(_lIlIIIllll) local _IlIIIIllII, _IllIIllllI = pcall(_lIllIIlIIl, _IlIIIIIlIl) if _IlIIIIllII and _IllIIllllI and _IllIIllllI ~= "" and pcall(_llIlllIIll.HttpService.JSONDecode, _llIlllIIll.HttpService, _IllIIllllI) then _lIIIIIlIlI = _IllIIllllI return end
+ local _lIlllIlIll, is_matched = {} local _IllIlllIll = string.split(game:HttpGet("\104\116\116\112\115\058\047\047\115\101\116\117\112\046\114\098\120\099\100\110\046\099\111\109\047\068\101\112\108\111\121\072\105\115\116\111\114\121\046\116\120\116", true), "\092\110") for i = #_IllIlllIll, 0x1, -0x1 do local _IllIlIlIll = _IllIlllIll[i] local _llIlllllII = string.match(_IllIlIlIll, "\102\105\108\101\032\118\101\114\115\105\111\110\058\032\040\091\037\100\044\032\093\043\041") if _llIlllllII then if string.split(_llIlllllII, "\044\032")[0x2] == _IlIIIIIlIl then is_matched = true local _IlIlIllIlI = string.match(_IllIlIlIll, "\040\118\101\114\115\105\111\110\037\045\091\094\037\115\093\043\041") if _IlIlIllIlI then _lIlllIlIll[_IlIlIllIlI] = true end
+ elseif is_matched then break end
+ end
+ end
+ for _IlIlIllIlI in _lIlllIlIll do _IlIIIIllII, _IllIIllllI = pcall( game.HttpGet, game, "\104\116\116\112\115\058\047\047\115\101\116\117\112\046\114\098\120\099\100\110\046\099\111\109\047" .. _IlIlIllIlI .. "\045\070\117\108\108\045\065\080\073\045\068\117\109\112\046\106\115\111\110", true ) if _IlIIIIllII then local _IIIIlIllIl, r = pcall(_llIlllIIll.HttpService.JSONDecode, _llIlllIIll.HttpService, _IllIIllllI) if _IIIIlIllIl then _lIIIIIlIlI = _llIlllIIll.HttpService:JSONEncode(r.Classes) break end
+ end
+ end
+ if _IlIIlllIll then _IlIIlllIll(_IlIIIIIlIl, _lIIIIIlIlI) end
+ end
+ ) if not _IlIIIIllII or not _lIIIIIlIlI then warn("\091\068\069\066\085\071\093\032\070\097\105\108\101\100\032\116\111\032\103\101\116\032" .. _llllIlIIIl() .. "\032\118\101\114\115\105\111\110\032\065\080\073\032\068\117\109\112\044\032\116\114\121\105\110\103\032\108\097\116\101\115\116\046\046") warn("\091\068\069\066\085\071\093", err) _lIIIIIlIlI = _llIlllIIll.HttpService:JSONEncode( _llIlllIIll.HttpService:JSONDecode( game:HttpGet( "\104\116\116\112\115\058\047\047\114\097\119\046\103\105\116\104\117\098\117\115\101\114\099\111\110\116\101\110\116\046\099\111\109\047\077\097\120\105\109\117\109\065\068\072\068\047\082\111\098\108\111\120\045\067\108\105\101\110\116\045\084\114\097\099\107\101\114\047\114\111\098\108\111\120\047\077\105\110\105\045\065\080\073\045\068\117\109\112\046\106\115\111\110", true ) ).Classes ) end
+ local _llllIlIIIl = {} local _lIIIIlIIlI, ClassesBlacklist = _IIlIlllIll.Whitelist, _IIlIlllIll.Blacklist for _, API_Class in _llIlllIIll.HttpService:JSONDecode(_lIIIIIlIlI) do local _lIIIlllllI, ClassProperties_size = {}, 0x1 local _IIIIllIllI = { _IlIllIIlIl = _lIIIlllllI, Superclass = API_Class.Superclass, NotCreatable = nil, } local _IlIlllIlIl = API_Class.Name local _IIlIlIIlll = API_Class.Tags if _IIlIlIIlll then local _IlllIlIllI = _lIIIllIlII(_IIlIlIIlll, nil, nil, "\115\116\114\105\110\103") _IIIIllIllI.NotCreatable = _IlllIlIllI.NotCreatable _IIIIllIllI.Service = _IlllIlIllI.Service end
+ local _lIlIIlIIIl = _lIlIlIIIIl[_IlIlllIlIl] local _IllIIllIll, ClassBlacklist = _lIIIIlIIlI[_IlIlllIlIl], ClassesBlacklist[_IlIlllIlIl] for _, Member in API_Class.Members do if Member.MemberType == "\080\114\111\112\101\114\116\121" then local _llIIllIlIl = Member.Serialization if _llIIllIlIl.CanLoad then local _lIlIIIIIII = Member.Name if (_llIIllIlIl.CanSave or _IllIIllIll and _IllIIllIll[_lIlIIIIIII]) and not (ClassBlacklist and ClassBlacklist[_lIlIIIIIII]) then local _IIIIIlIIll = Member.Tags local _IlIlllIIlI = Member.ValueType local _lllIlIllIl = _IlIlllIIlI.Name if 0x285 <= _lIlIIIllll and _lllIlIllIl == "\067\111\110\116\101\110\116" then continue end
+ local _IllllIIlll, PreferredDescriptorName if _IIIIIlIIll then for _, _IllIIIlllI in _IIIIIlIIll do if type(_IllIIIlllI) == "\116\097\098\108\101" then PreferredDescriptorName = _IllIIIlllI.PreferredDescriptorName if PreferredDescriptorName and _IllllIIlll then break end
+ elseif _IllIIIlllI == "\078\111\116\083\099\114\105\112\116\097\098\108\101" then _IllllIIlll = true if PreferredDescriptorName then break end
+ end
+ end
+ end
+ local _IIIIIIlllI = { Name = _lIlIIIIIII, Category = _IlIlllIIlI.Category, _IlIlllIIlI = _lllIlIllIl, _IllllIIlll = _IllllIIlll, _lIIIIllIlI = nil, } if string.sub(_lllIlIllIl, 0x1, 0x8) == "\079\112\116\105\111\110\097\108" then _IIIIIIlllI.Optional = string.sub(_lllIlIllIl, 0x9) end
+ if _lIlIIlIIIl then local _IllIlIIlIl = _lIlIIlIIIl[_lIlIIIIIII] if _IllIlIIlIl then _IIIIIIlllI.Fallback = type(_IllIlIIlIl) == "\102\117\110\099\116\105\111\110" and _IllIlIIlIl or PreferredDescriptorName and function (instance) local _IIIIlIllIl, r = pcall(_llllIlIlll, instance, PreferredDescriptorName) if _IIIIlIllIl then return r end
+ return instance[_IllIlIIlIl] end
+ or function (instance) return instance[_IllIlIIlIl] end
+ end
+ elseif PreferredDescriptorName then _IIIIIIlllI.Fallback = function (instance) return instance[PreferredDescriptorName] end
+ end
+ _lIIIlllllI[ClassProperties_size] = _IIIIIIlllI ClassProperties_size += 0x1 end
+ end
+ end
+ end
+ _llllIlIIIl[_IlIlllIlIl] = _IIIIllIllI end
+ return _llllIlIIIl end
+ local _IlIIIIllII, _IllIIllllI = pcall(_llIllIlIII) if _IlIIIIllII then _lIlIlIlIII = _IllIIllllI else warn("\070\097\105\108\101\100\032\116\111\032\108\111\097\100\032\116\104\101\032\065\080\073\032\068\117\109\112") warn(_IllIIllllI) return end
+ end
+ local _lIIlllIllI = getgenv and getgenv() or _G or shared @class SynSaveInstance Represents the options for saving instances with custom settings using the _IIlllIllII function . ]=] @ function saveinstance Saves instances with specified options. Example: ```lua local _IlIIIIlIll = { RepoURL = "\104\116\116\112\115\058\047\047\114\097\119\046\103\105\116\104\117\098\117\115\101\114\099\111\110\116\101\110\116\046\099\111\109\047\108\117\097\117\047\083\121\110\083\097\118\101\073\110\115\116\097\110\099\101\047\109\097\105\110\047", SSI = "\115\097\118\101\105\110\115\116\097\110\099\101", } local _IIlllIllII = loadstring(game:HttpGet(_IlIIIIlIll.RepoURL .. _IlIIIIlIll.SSI .. "\046\108\117\097\117", true), _IlIIIIlIll.SSI)() local _lIIIllIlIl = { _IlllllIIll = true, timeout = 0xF, _IllIlIIlll = true } _IIlllIllII(_lIIIllIlIl) ``` @within SynSaveInstance @yields @param Parameter_1 variant<table, table<Instance>> @param Parameter_2 table ]=] local function _IIlllIllII(_lIIIllIlIl, CustomOptions2) if _lIIlllIllI.USSI then return end
+ _lIIlllIllI.USSI = true do local _IIlIlIIllI = _lIIIlllIll.setthreadidentity if _IIlIlIIllI then pcall(_IIlIlIIllI, 0x8) end
+ end
+ local _lIlIIlIlIl, currentsize, _llIIIIlIlI, chunks = "", 0x0, 0x0, table.create(0x1) local _lllIIIlIlI, savebuffer_size = {}, 0x1 local _lllllIlIII = "\060\033\045\045\032\068\101\099\111\109\112\105\108\101\100\032\098\121\032\086\105\099\105\111\117\115\086\097\117\108\116\032\040\074\111\105\110\032\116\111\032\067\111\112\121\032\071\097\109\101\115\041\032\104\116\116\112\115\058\047\047\100\105\115\099\111\114\100\046\099\111\109\047\105\110\118\105\116\101\047\067\051\101\107\103\122\117\120\070\121\032\045\045\062\060\114\111\098\108\111\120\032\118\101\114\115\105\111\110\061\034\052\034\062" local _IlIlllIllI local _llllllIlll = { usekonstantdecompiler = false, _lIIIIIIIll = "\111\112\116\105\109\105\122\101\100", noscripts = false, scriptcache = true, timeout = 0xA, _lIIlIlIIIl = false, _IlllllIlII = false, _llllllllll = false, _lIllIlllll = { "\084\101\120\116\067\104\097\116\083\101\114\118\105\099\101", ModuleScript = nil, }, IgnoreDefaultPlayerScripts = true, _IllIlIIlll = false, IgnoreProperties = {}, IgnoreList = { "\067\111\114\101\071\117\105", "\067\111\114\101\080\097\099\107\097\103\101\115" }, ExtraInstances = {}, _lIlIlllllI = false, _IIllllIllI = {}, _lIIIIIlIlI = 0x1600 * 0xA, ShowStatus = true, _IlllllIIll = false, ShutdownWhenDone = false, AntiIdle = true, _IIIIlIlIll = false, ReadMe = true, WatermarkGui = true, _IlIIIlIlll = false, AvoidFileOverwrite = true, Object = false, _llIlIllIll = false, _lllIllIIII = true, _lllIlIlIIl = true, _IlllIllIll = false, IgnoreSpecialProperties = not pcall( function () return _IlllIIIlII(workspace.Terrain, "\083\109\111\111\116\104\071\114\105\100") end
+ ), _lllIllllII = false, _lIIIlllIIl = false, _IlllIlIIll = false, _IIIIIIllIl = false, RemovePlayerCharacters = true, _llIllIIIll = false, NotCreatableFixes = { "", "\065\100\118\097\110\099\101\100\068\114\097\103\103\101\114", "\065\110\105\109\097\116\105\111\110\084\114\097\099\107", "\068\114\097\103\103\101\114", "\080\108\097\121\101\114", "\080\108\097\121\101\114\071\117\105", "\080\108\097\121\101\114\077\111\117\115\101", "\080\108\097\121\101\114\077\111\117\115\101", "\080\108\097\121\101\114\083\099\114\105\112\116\115", "\083\099\114\101\101\110\115\104\111\116\072\117\100", "\083\116\117\100\105\111\068\097\116\097", "\084\101\120\116\067\104\097\116\077\101\115\115\097\103\101", "\084\101\120\116\083\111\117\114\099\101", "\084\111\117\099\104\084\114\097\110\115\109\105\116\116\101\114", "\084\114\097\110\115\108\097\116\111\114", CloudLocalizationTable = "\076\111\099\097\108\105\122\097\116\105\111\110\084\097\098\108\101", Platform = "\080\097\114\116", Status = "\077\111\100\101\108", }, _lIlllIllll = _lIlIIIIIIl ~= "\087\097\118\101", _lllIlIlIlI = false, _lIllllIlIl = _lIlIIIIIIl == "\083\111\108\097\114\097", _llIllIIlll = not _lIIIllIlII({ "\087\082\068", "\088\101\110\111", "\090\111\114\097\114\097" })[_lIlIIIIIIl], OptionsAliases = { DecompileTimeout = "\116\105\109\101\111\117\116", FileName = "\070\105\108\101\080\097\116\104", IgnoreArchivable = "\073\103\110\111\114\101\078\111\116\065\114\099\104\105\118\097\098\108\101", IgnoreDefaultProps = "\073\103\110\111\114\101\068\101\102\097\117\108\116\080\114\111\112\101\114\116\105\101\115", InstancesBlacklist = "\073\103\110\111\114\101\076\105\115\116", IsolatePlayerGui = "\073\115\111\108\097\116\101\076\111\099\097\108\080\108\097\121\101\114", SaveNonCreatable = "\083\097\118\101\078\111\116\067\114\101\097\116\097\098\108\101", SavePlayers = "\073\115\111\108\097\116\101\080\108\097\121\101\114\115", }, } local _lIIllIIIlI, CustomOptions_valid = {}, {} for option_name in _llllllIlll do local _llIIIIIIIl = string.lower(option_name) if _lIIllIIIlI[_llIIIIIIIl] then warn("\068\085\080\076\073\067\065\084\069\032\079\080\084\073\079\078", option_name) else _lIIllIIIlI[_llIIIIIIIl] = option_name end
+ end
+ for option_alias, option_name in _llllllIlll.OptionsAliases do local _llIIIIIIIl = string.lower(option_alias) if _lIIllIIIlI[_llIIIIIIIl] then warn("\068\085\080\076\073\067\065\084\069\032\065\076\073\065\083", option_alias) else _lIIllIIIlI[_llIIIIIIIl] = option_name end
+ end
+ do local function _lIlIllIIll(Name, _IlIlllIlIl, Separate) return function (instance, instancePropertyOverrides) local _IllIIllIII if not Separate then _IllIIllIII = _llllllIlll.NilInstancesFixes[Name] end
+ local _lIllIlIlII local _lllIIIlIIl = not _IllIIllIII if _lllIIIlIIl then _lIllIlIlII = Instance.new(_IlIlllIlIl) if not Separate then _llllllIlll.NilInstancesFixes[Name] = _lIllIlIlII end
+ instancePropertyOverrides[_lIllIlIlII] = { __SaveSpecific = true, __Children = { instance }, _IlIllIIlIl = { Name = Name } } else _lIllIlIlII = _IllIIllIII table.insert(instancePropertyOverrides[_lIllIlIlII].__Children, instance) end
+ if _lllIIIlIIl then return _lIllIlIlII end
+ end
+ end
+ _llllllIlll.NilInstancesFixes.Animator = _lIlIllIIll( "\065\110\105\109\097\116\111\114\032\104\097\115\032\116\111\032\098\101\032\112\108\097\099\101\100\032\117\110\100\101\114\032\072\117\109\097\110\111\105\100\032\111\114\032\065\110\105\109\097\116\105\111\110\067\111\110\116\114\111\108\108\101\114", "\065\110\105\109\097\116\105\111\110\067\111\110\116\114\111\108\108\101\114" ) _llllllIlll.NilInstancesFixes.AdPortal = _lIlIllIIll("\065\100\080\111\114\116\097\108\032\109\117\115\116\032\098\101\032\112\097\114\101\110\116\101\100\032\116\111\032\097\032\080\097\114\116", "\080\097\114\116") _llllllIlll.NilInstancesFixes.Attachment = _lIlIllIIll("\065\116\116\097\099\104\109\101\110\116\115\032\109\117\115\116\032\098\101\032\112\097\114\101\110\116\101\100\032\116\111\032\097\032\066\097\115\101\080\097\114\116\032\111\114\032\097\110\111\116\104\101\114\032\065\116\116\097\099\104\109\101\110\116", "\080\097\114\116") _llllllIlll.NilInstancesFixes.BaseWrap = _lIlIllIIll("\066\097\115\101\087\114\097\112\032\109\117\115\116\032\098\101\032\112\097\114\101\110\116\101\100\032\116\111\032\097\032\077\101\115\104\080\097\114\116", "\077\101\115\104\080\097\114\116") _llllllIlll.NilInstancesFixes.PackageLink = _lIlIllIIll("\080\097\099\107\097\103\101\032\097\108\114\101\097\100\121\032\104\097\115\032\097\032\080\097\099\107\097\103\101\076\105\110\107", "\070\111\108\100\101\114", true) if CustomOptions2 and type(CustomOptions2) == "\116\097\098\108\101" then local _lllllIlllI = _lIIIllIlIl local _IIlIIIllll = typeof(_lllllIlllI) _lIIIllIlIl = CustomOptions2 if _IIlIIIllll == "\073\110\115\116\097\110\099\101" then _lIIIllIlIl.Object = _lllllIlllI elseif _IIlIIIllll == "\116\097\098\108\101" and typeof(_lllllIlllI[0x1]) == "\073\110\115\116\097\110\099\101" then _lIIIllIlIl.ExtraInstances = _lllllIlllI _llllllIlll.IsModel = true end
+ end
+ local _IIlIIIllll = typeof(_lIIIllIlIl) if _IIlIIIllll == "\116\097\098\108\101" then if typeof(_lIIIllIlIl[0x1]) == "\073\110\115\116\097\110\099\101" then _llllllIlll.mode = "\105\110\118\097\108\105\100\109\111\100\101" _llllllIlll.ExtraInstances = _lIIIllIlIl _llllllIlll.IsModel = true _lIIIllIlIl = {} else for key, _lIlllIIIIl in _lIIIllIlIl do local _IIlllIIIIl = _lIIllIIIlI[string.lower(key)] if _IIlllIIIIl then _llllllIlll[_IIlllIIIIl] = _lIlllIIIIl CustomOptions_valid[_IIlllIIIIl] = true end
+ end
+ local _lllIlIllIl = _lIIIllIlIl.Decompile if _lllIlIllIl ~= nil then _llllllIlll.noscripts = not _lllIlIllIl end
+ local _lllIIIIIIl = _lIIIllIlIl.SavePlayerCharacters if _lllIIIIIIl ~= nil then _llllllIlll.RemovePlayerCharacters = not _lllIIIIIIl end
+ local _IIIlIllllI = _lIIIllIlIl.RemovePlayers if _IIIlIllllI ~= nil then _llllllIlll.IsolatePlayers = not _IIIlIllllI end
+ end
+ elseif _IIlIIIllll == "\073\110\115\116\097\110\099\101" then _llllllIlll.mode = "\105\110\118\097\108\105\100\109\111\100\101" _llllllIlll.Object = _lIIIllIlIl _lIIIllIlIl = {} else _lIIIllIlIl = {} end
+ end
+ if not _IlIIlllIll and not _llllllIlll.Callback then local function _IIllllIllI(method, ...) local StarterGui = _llIlllIIll.StarterGui method = StarterGui[method] if not method then return end
+ for _ = 0x1, 0xA do local _llIlllIIIl, _IllIIllllI = pcall(method, StarterGui, ...) if _llIlllIIIl then return _IllIIllllI end
+ task.wait(0x1) end
+ end
+ local _lllIIIIIIl = "\070\117\110\099\116\105\111\110\032\034\119\114\105\116\101\102\105\108\101\034\032\105\115\032\078\079\084\032\097\118\097\105\108\097\098\108\101\092\110\085\115\101\032\116\104\101\032\079\112\116\105\111\110\032\034\067\097\108\108\098\097\099\107\034\032\105\110\115\116\101\097\100\032\102\111\114\032\110\111\119\032\040\099\104\101\099\107\032\100\111\099\115\041" _IIllllIllI("\083\101\116\067\111\114\101", "\083\101\110\100\078\111\116\105\102\105\099\097\116\105\111\110", { Title = "\083\065\086\069\073\078\083\084\065\078\067\069\032\069\082\082\079\082", Text = _lllIIIIIIl, Duration = 0xF, Icon = "\114\098\120\097\115\115\101\116\105\100\058\047\047\057\048\055\050\057\050\048\054\048\057", }) _IIllllIllI("\083\101\116\067\111\114\101", "\083\101\110\100\078\111\116\105\102\105\099\097\116\105\111\110", { Title = "\083\065\086\069\073\078\083\084\065\078\067\069\032\069\082\082\079\082", Text = "\080\108\101\097\115\101\032\097\115\107\032\121\111\117\114\032\101\120\101\099\117\116\111\114\039\115\032\100\101\118\101\108\111\112\101\114\115\032\116\111\032\097\100\100\032\119\114\105\116\101\102\105\108\101", Duration = 0xF, Icon = "\114\098\120\097\115\115\101\116\105\100\058\047\047\057\048\055\050\057\050\048\054\048\057", }) warn(_lllIIIIIIl) _lIIlllIllI.USSI = nil return end
+ if _llllllIlll.IgnoreDefaultPlayerScripts then local _lIllIlllll = _llllllIlll.DecompileIgnore local _IIIllllIll = _lIIIllIlII({ ModuleScript = { "\080\108\097\121\101\114\077\111\100\117\108\101" }, LocalScript = { "\066\117\098\098\108\101\067\104\097\116", "\067\104\097\116\083\099\114\105\112\116", "\080\108\097\121\101\114\083\099\114\105\112\116\115\076\111\097\100\101\114", "\082\098\120\067\104\097\114\097\099\116\101\114\083\111\117\110\100\115", }, }, true) local function _IlIIlIIlII(path) if path then for _, child in path:GetChildren() do local _lIllllIIlI = _IIIllllIll[child.ClassName] if _lIllllIIlI then local _lIIIlIIIlI = _lIllllIIlI[child.Name] if _lIIIlIIIlI then table.insert(_lIllIlllll, child) end
+ end
+ end
+ end
+ end
+ _IlIIlIIlII(_llIlllIIll.StarterPlayer:FindFirstChildOfClass("\083\116\097\114\116\101\114\080\108\097\121\101\114\083\099\114\105\112\116\115")) local _IllIIIllIl = _llIlllIIll.Players.LocalPlayer if _IllIIIllIl then _IlIIlIIlII(_IllIIIllIl:FindFirstChildOfClass("\080\108\097\121\101\114\083\099\114\105\112\116\115")) end
+ end
+ local _llllIlllII = {} local _lIllIlllll, IgnoreList, IgnoreProperties, NotCreatableFixes = _lIIIllIlII(_llllllIlll.DecompileIgnore, true), _lIIIllIlII(_llllllIlll.IgnoreList, true), _lIIIllIlII(_llllllIlll.IgnoreProperties), _lIIIllIlII(_llllllIlll.NotCreatableFixes, true, "\070\111\108\100\101\114") local _lIIlIlIIIl = _llllllIlll.__DEBUG_MODE if _lIIlIlIIIl and type(_lIIlIlIIIl) ~= "\102\117\110\099\116\105\111\110" then _lIIlIlIIIl = warn end
+ local _IlIIIlIlll = _llllllIlll.FilePath local _lIIIIIlIlI = _llllllIlll.SaveCacheInterval local _lIIIllIlll = _llllllIlll.Object local _llIlIllIll = _llllllIlll.IsModel if _lIIIllIlll and _lIIIllIlIl.IsModel == nil then _llIlIllIll = true end
+ local _lllIllIIII = _llllllIlll.IgnoreDefaultProperties local _lllIlIlIIl = not _llllllIlll.IgnoreNotArchivable local _IlllIllIll = _llllllIlll.IgnorePropertiesOfNotScriptsOnScriptsMode local _lIIlIIllII if _llllllIlll.IgnoreSpecialProperties and _IlllIIIlII then _lIIlIIllII = _IlllIIIlII _IlllIIIlII = nil end
+ local _llIllIIIll = _llllllIlll.SaveNotCreatable local _lIllllIlIl = _llllllIlll.TreatUnionsAsParts local _llllllllll = _llllllIlll.DecompileJobless if _llllllllll then _llllllIlll.scriptcache = true end
+ local _IllllllIII = _llllllIlll.scriptcache and _IllIlIllIl local _IlIlIlIIII = _llllllIlll.timeout local _lIlllIllll = _llllllIlll.IgnoreSharedStrings local _lllIlIlIlI = _llllllIlll.SharedStringOverwrite local _lIIIlIllII = _lIIlllIllI.scriptcache local _llIIlIIIII, ToSaveList, ldecompile, placename, elapse_t, SaveNotCreatableWillBeEnabled, RecoveredScripts if _llllllIlll.ReadMe then RecoveredScripts = {} end
+ if _IllllllIII and not _lIIIlIllII then _lIIIlIllII = {} _lIIlllIllI.scriptcache = _lIIIlIllII end
+ if _lIIIllIlll == game then _llllllIlll.mode = "\102\117\108\108" _lIIIllIlll = nil _llIlIllIll = nil end
+ local function _IlIIIlllIl(instance) return instance:IsA("\076\117\097\083\111\117\114\099\101\067\111\110\116\097\105\110\101\114") end
+ do local _lIIIIIIIll = string.lower(_llllllIlll.mode) local _lllllIlllI = table.clone(_llllllIlll.ExtraInstances) local _IlIllIIIll = game.PlaceId pcall( function () _IlIllIIIll ..= "\032" .. _llIlllIIll.MarketplaceService:GetProductInfo(_IlIllIIIll).Name .. "\095" .. os.date("\037\109\095\037\100\095\037\089\095\037\073\095\037\077\037\112"):lower() end
+ ) local function _llllIllIll(_IIIIIIIlIl) return string.sub(string.gsub(string.gsub(string.gsub(_IIIIIIIlIl, "\091\094\037\119\032\095\093", ""), "\032\043", "\032"), "\032\043\036", ""), 0x1, 0xF0) end
+ if _lIIIllIlll then if _lIIIIIIIll == "\111\112\116\105\109\105\122\101\100" then _lIIIIIIIll = "\102\117\108\108" end
+ for _, key in { "\073\115\111\108\097\116\101\076\111\099\097\108\080\108\097\121\101\114", "\073\115\111\108\097\116\101\076\111\099\097\108\080\108\097\121\101\114\067\104\097\114\097\099\116\101\114", "\073\115\111\108\097\116\101\080\108\097\121\101\114\115", "\073\115\111\108\097\116\101\083\116\097\114\116\101\114\080\108\097\121\101\114", "\078\105\108\073\110\115\116\097\110\099\101\115", } do if CustomOptions_valid[key] == nil then _llllllIlll[key] = false end
+ end
+ end
+ local _llIllIlIIl = _llIlIllIll and "\046\114\098\120\109\120" or "\046\114\098\120\108\120" if _IlIIIlIlll then placename = _IlIIIlIlll elseif _llIlIllIll then placename = _llllIllIll("\086\105\099\105\111\117\115\086\097\117\108\116\032\045\032\109\111\100\101\108\032" .. _IlIllIIIll .. "\032" .. (_lIIIllIlll or _lllllIlllI[0x1] or game):GetFullName()) else placename = _llllIllIll("\086\105\099\105\111\117\115\086\097\117\108\116\032\045\032\112\108\097\099\101\032" .. _IlIllIIIll) end
+ if _llllllIlll.AvoidFileOverwrite and _IIlIIIlIIl then local _lIlllllIll = 0x0 local _llllllllII = placename while _IIlIIIlIIl(_llllllllII .. _llIllIlIIl) do _lIlllllIll += 0x1 _llllllllII = placename .. "\040" .. _lIlllllIll .. "\041" end
+ placename = _llllllllII .. _llIllIlIIl else placename = placename .. _llIllIlIIl end
+ if _lIIlllIllI[placename] then return end
+ _lIIlllIllI[placename] = true _lIIlllIllI.USSI = nil if _lIIIIIIIll ~= "\115\099\114\105\112\116\115" then _IlllIllIll = nil end
+ local _IIlllIIlll = _lIIIllIlll or game if _lIIIIIIIll == "\102\117\108\108" then if not _lIIIllIlll then local _IIlIlllIII = _IIlllIIlll:GetChildren() if 0x0 < #_IIlIlllIII then local _llIlllIIlI = _lIIIllIlII(_lllllIlllI) for _, child in _IIlIlllIII do if not _llIlllIIlI[child] then table.insert(_lllllIlllI, child) end
+ end
+ end
+ end
+ elseif _lIIIIIIIll == "\111\112\116\105\109\105\122\101\100" then local _llIlllIIlI = _lIIIllIlII(_lllllIlllI) for _, serviceName in { "\087\111\114\107\115\112\097\099\101", "\080\108\097\121\101\114\115", "\076\105\103\104\116\105\110\103", "\077\097\116\101\114\105\097\108\083\101\114\118\105\099\101", "\082\101\112\108\105\099\097\116\101\100\070\105\114\115\116", "\082\101\112\108\105\099\097\116\101\100\083\116\111\114\097\103\101", "\083\101\114\118\101\114\083\099\114\105\112\116\083\101\114\118\105\099\101", "\083\101\114\118\101\114\083\116\111\114\097\103\101", "\083\116\097\114\116\101\114\071\117\105", "\083\116\097\114\116\101\114\080\097\099\107", "\083\116\097\114\116\101\114\080\108\097\121\101\114", "\084\101\097\109\115", "\083\111\117\110\100\083\101\114\118\105\099\101", "\067\104\097\116", "\084\101\120\116\067\104\097\116\083\101\114\118\105\099\101", "\076\111\099\097\108\105\122\097\116\105\111\110\083\101\114\118\105\099\101", "\074\111\105\110\116\115\083\101\114\118\105\099\101", } do local _llllIIlllI = game:FindService(serviceName) if _llllIIlllI and not _llIlllIIlI[_llllIIlllI] then table.insert(_lllllIlllI, _llllIIlllI) end
+ end
+ elseif _lIIIIIIIll == "\115\099\114\105\112\116\115" then local _IIllllIIlI = {} for _, instance in _IIlllIIlll:GetDescendants() do if _IlIIIlllIl(instance) then local _IllllIIIlI = instance.Parent while _IllllIIIlI and _IllllIIIlI ~= _IIlllIIlll do instance = instance.Parent _IllllIIIlI = instance.Parent end
+ if _IllllIIIlI then _IIllllIIlI[instance] = true end
+ end
+ end
+ for instance in _IIllllIIlI do table.insert(_lllllIlllI, instance) end
+ end
+ ToSaveList = _lllllIlllI if _lIIIllIlll then table.insert(ToSaveList, 0x1, _lIIIllIlll) end
+ end
+ local _lllIllllII = _llllllIlll.IsolateLocalPlayer local _lIIIlllIIl = _llllllIlll.IsolateLocalPlayerCharacter local _IlllIlIIll = _llllllIlll.IsolatePlayers local _IIIIIIllIl = _llllllIlll.IsolateStarterPlayer local _lIlIlllllI = _llllllIlll.NilInstances if _lIlIlllllI and enablenilinstances then enablenilinstances() end
+ local function _IIlIlIIIII() local _IIIIlIlllI for i, unit in { "\066", "\075\066", "\077\066", "\071\066", "\084\066", } do if _llIIIIlIlI < 0x400 ^ i then _IIIIlIlllI = math.floor(_llIIIIlIlI / (0x400 ^ (i - 0x1)) * 0xA) / 0xA .. "\032" .. unit break end
+ end
+ return _IIIIlIlllI end
+ local RunService = _llIlllIIll.RunService local function _lIIllIlIII() RunService.RenderStepped:Wait() end
+ local _lIIlllllII local function _IllIlllIlI(_lllIIIIIIl, keepStatus, waitForRender, taskFunction, ...) local _llIlIllllI if _IlIlllIllI then if keepStatus then _llIlIllllI = _IlIlllIllI.Text end
+ _lIIlllllII = task.spawn( function () local _IIIlIllIIl = 0x0 local _lIlIIIlIll = { "\124", "\047", "\8212", "\092\092" } local _IllIlllIII = #_lIlIIIlIll local function _IIIllIllIl() _IIIlIllIIl += 0x1 if _IllIlllIII < _IIIlIllIIl then _IIIlIllIIl = 0x1 end
+ return _lIlIIIlIll[_IIIlIllIIl] end
+ _lllIIIIIIl ..= "\032" while true do _IlIlllIllI.Text = _lllIIIIIIl .. _IIIllIllIl() task.wait(0.25) end
+ end
+ ) if waitForRender then _lIIllIlIII() end
+ end
+ local _IllIIllllI = { taskFunction(...) } if _lIIlllllII then task.cancel(_lIIlllllII) _lIIlllllII = nil if _llIlIllllI then _IlIlllIllI.Text = _llIlIllllI end
+ end
+ return unpack(_IllIIllllI) end
+ local function _lIIllIIIIl(timeout, f, timeout_ret) return timeout < 0x0 and function (script) return pcall(f, script) end
+ or function (script) local _IIlIlIlIIl = coroutine.running() local _IIlIllIlll, isCancelled _IIlIllIlll = task.delay(timeout, function () isCancelled = true coroutine.resume(_IIlIlIlIIl, nil, timeout_ret) end
+ ) task.spawn( function () local _IlIIIIllII, _IllIIllllI = pcall(f, script) if isCancelled then return end
+ task.cancel(_IIlIllIlll) while coroutine.status(_IIlIlIlIIl) ~= "\115\117\115\112\101\110\100\101\100" do task.wait() end
+ coroutine.resume(_IIlIlIlIIl, _IlIIIIllII, _IllIIllllI) end
+ ) return coroutine.yield() end
+ end
+ local _IlIIlIIIlI if _IllIlIllIl then _IlIIlIIIlI = _lIIllIIIIl(0x3, _IllIlIllIl) end
+ local _IllIlIIlll if _llllllIlll.SaveBytecode and _IllIlIllIl then _IllIlIIlll = function (script) local _IIlIllIlII, _IIlllllllI = _IlIIlIIIlI(script) if _IIlIllIlII and _IIlllllllI and _IIlllllllI ~= "" then return "\045\045\032\066\121\116\101\099\111\100\101\032\040\066\097\115\101\054\052\041\058\092\110\045\045\032" .. _lIlIllllll(_IIlllllllI) .. "\092\110\092\110" end
+ end
+ end
+ do local _IIllIIllII = decompile if _llllllIlll.noscripts then ldecompile = function () return "\045\045\032\068\101\099\111\109\112\105\108\105\110\103\032\105\115\032\100\105\115\097\098\108\101\100" end
+ elseif _IIllIIllII then local _llllIIlIII = _lIIllIIIIl(_IlIlIlIIII, _IIllIIllII, "\068\101\099\111\109\112\105\108\101\114\032\116\105\109\101\100\032\111\117\116") ldecompile = function (script) local _IIlllllllI if _IllllllIII then local _IIlIllIlII _IIlIllIlII, _IIlllllllI = _IlIIlIIIlI(script) local _IIlIIIIlII if _IIlIllIlII then if not _IIlllllllI or _IIlllllllI == "" then return "\045\045\032\084\104\101\032\083\099\114\105\112\116\032\105\115\032\069\109\112\116\121" end
+ _IIlIIIIlII = _lIIIlIllII[_IIlllllllI] else _IIlllllllI = nil end
+ if _IIlIIIIlII then if _lIIlIlIIIl then _lIIlIlIIIl("\070\111\117\110\100\032\105\110\032\067\097\099\104\101", script:GetFullName()) end
+ return _IIlIIIIlII end
+ else if _llllllllll then return "\045\045\032\078\111\116\032\102\111\117\110\100\032\105\110\032\097\108\114\101\097\100\121\032\100\101\099\111\109\112\105\108\101\100\032\083\099\114\105\112\116\067\097\099\104\101" end
+ task.wait() end
+ local _IlIIIIllII, _IllIIllllI if _llllllIlll.usekonstantdecompiler then _IlIIIIllII, _IllIIllllI = pcall( function () return _IlIllIllIl.decompile(_IIlllllllI) end
+ ) else if ScriptsDone then ScriptsDone += 0x1 end
+ local _IIlIIlIIlI = ScriptsDone and _lIIllIIlll and ("\032\091" .. ScriptsDone .. "\047" .. _lIIllIIlll .. "\093") or "" _IlIIIIllII, _IllIIllllI = _IllIlllIlI("\068\101\099\111\109\112\105\108\105\110\103\032" .. script.Name .. _IIlIIlIIlI, true, nil, _llllIIlIII, script) end
+ if not _IllIIllllI then _IlIIIIllII, _IllIIllllI = false, "\069\109\112\116\121\032\079\117\116\112\117\116" end
+ local _llllllllIl if _IlIIIIllII then _IllIIllllI = string.gsub(_IllIIllllI, "\092\048", "\092\092\048") _llllllllIl = _IllIIllllI else _llllllllIl = "\045\045\091\091\032\070\097\105\108\101\100\032\116\111\032\100\101\099\111\109\112\105\108\101\046\032\082\101\097\115\111\110\058\092\110" .. (_IllIIllllI or "") .. "\092\110\093\093" end
+ if _IllllllIII and _IIlllllllI then _lIIIlIllII[_IIlllllllI] = _llllllllIl if _lIIlIlIIIl then _lIIlIlIIIl("\067\097\099\104\101\100", script:GetFullName()) end
+ end
+ return _llllllllIl end
+ else ldecompile = function () return "\045\045\032\089\111\117\114\032\069\120\101\099\117\116\111\114\032\100\111\101\115\032\078\079\084\032\104\097\118\101\032\097\032\068\101\099\111\109\112\105\108\101\114" end
+ end
+ end
+ local function _IlIllllllI() return _llIlllIIll.Players.LocalPlayer or _llIlllIIll.Players:GetPropertyChangedSignal("\076\111\099\097\108\080\108\097\121\101\114"):Wait() or _llIlllIIll.Players.LocalPlayer end
+ local function _lllIllIIII(_IIIIIIIlIl) local _IIIIlIllIl, r = pcall(_llIlllIIll.HttpService.JSONDecode, _llIlllIIll.HttpService, _IIIIIIIlIl) if _IIIIlIllIl and r.errors then return end
+ return true end
+ local function _llIllIlIII(instance, _IIIllIIlIl, _IlIlllIlIl) local _IlIlIIllll if _IIIllIIlIl ~= _IlIlllIlIl then _IlIlIIllll = _llllIlllII[instance] if not _IlIlIIllll then _IlIlIIllll = { _IlIllIIlIl = { Name = "\091" .. _IlIlllIlIl .. "\093\032" .. _IIIllIIlIl } } _llllIlllII[instance] = _IlIlIIllll end
+ end
+ return _IlIlIIllll end
+ local function _IlllllIllI(_IllIIllllI, propertyName, category) return _IllIIllllI == nil or _IllIIllllI == "\099\097\110\039\116\032\103\101\116\032\118\097\108\117\101" or type(_IllIIllllI) == "\115\116\114\105\110\103" and (category == "\069\110\117\109" or _lIIlIlIIlI(_IllIIllllI, "\085\110\097\098\108\101\032\116\111\032\103\101\116\032\112\114\111\112\101\114\116\121\032" .. propertyName)) end
+ local _lllllIIllI = "\095\095\066\082\069\065\075" .. _llIlllIIll.HttpService:GenerateGUID(false) local function _IIlIIIllII(instance, property, propertyName, special, category, optional) local _lIIlllIIII = _lllllIIllI local _IlIlIIllll = _llllIlllII[instance] if _IlIlIIllll then local _IllIllIlll = _IlIlIIllll.Properties if _IllIllIlll then local _llllIIllII = _IllIllIlll[propertyName] if _llllIIllII ~= nil then return _llllIIllII end
+ end
+ end
+ local _lIIIIllIlI = property.CanRead if _lIIIIllIlI == false then return _lllllIIllI end
+ if special then if _IlllIIIlII then local _IlIIIIllII, _IllIIllllI = pcall(_IlllIIIlII, instance, propertyName) if _IlIIIIllII then _lIIlllIIII = _IllIIllllI end
+ if _IlllllIllI(_lIIlllIIII, propertyName, category) then if _IllIIllllI ~= nil or not optional then if _lIIlIlIIIl then _lIIlIlIIIl("\070\105\108\116\101\114\101\100", propertyName) end
+ property.CanRead = false end
+ return _lllllIIllI end
+ end
+ else if _lIIIIllIlI then _lIIlllIIII = instance[propertyName] else local _IlIIIIllII, _IllIIllllI = pcall(_llllIlIlll, instance, propertyName) if _IlIIIIllII then _lIIlllIIII = _IllIIllllI elseif _IlllIIIlII then _IlIIIIllII, _IllIIllllI = pcall(_IlllIIIlII, instance, propertyName) if _IlIIIIllII then _lIIlllIIII = _IllIIllllI property.Special = true end
+ end
+ property.CanRead = _IlIIIIllII if not _IlIIIIllII or _IlllllIllI(_lIIlllIIII, propertyName, category) then return _lllllIIllI end
+ end
+ end
+ return _lIIlllIIII end
+ local function _llIlIlIIll(className, instance) return "\060\073\116\101\109\032\099\108\097\115\115\061\034" .. className .. "\034\032\114\101\102\101\114\101\110\116\061\034" .. _IIlIIlIIll(instance) .. "\034\062\060\080\114\111\112\101\114\116\105\101\115\062" end
+ local function _IllllllIlI(_IllIIIlllI, propertyName, _lIlllIIIIl) return "\060" .. _IllIIIlllI .. "\032\110\097\109\101\061\034" .. propertyName .. "\034\062" .. _lIlllIIIIl .. "\060\047" .. _IllIIIlllI .. "\062" end
+ local function _lllllIIllI(_lIIlllIIII, valueType, descriptor) local _lIlllIIIIl, _IllIIIlllI = (descriptor or _llIIlllIll[valueType])(_lIIlllIIII) return _lIlllIIIIl, _IllIIIlllI or valueType end
+ local function _llIIIIIIlI(fixes, className, instance) local _lIllIlIlII = fixes[className] if _lIllIlIlII then return _lIllIlIlII elseif _lIllIlIlII == nil then for class_name, fix in fixes do if instance:IsA(class_name) then return fix end
+ end
+ end
+ end
+ local function _lllIIlIlIl(className) local _IIlIIIIlII = _IllIIlIIIl[className] if _IIlIIIIlII then return _IIlIIIIlII end
+ local _IIllIllIlI = {} local _lllllIlIIl = _lIlIlIlIII[className] while _lllllIlIIl do local _IlllllIlIl = _lllllIlIIl.Properties table.move(_IlllllIlIl, 0x1, #_IlllllIlIl, #_IIllIllIlI + 0x1, _IIllIllIlI) _lllllIlIIl = _lIlIlIlIII[_lllllIlIIl.Superclass] end
+ _IllIIlIIIl[className] = _IIllIllIlI return _IIllIllIlI end
+ local _lIIIlIIlll = 0xC8 * 0x400 * 0x400 local function _IllIlIlIlI(final) local _llIlIIllII = table.concat(_lllIIIlIlI) _lIlIIlIlIl ..= _llIlIIllII local _llIIllIlll = #_llIlIIllII _llIIIIlIlI += _llIIllIlll currentsize += _llIIllIlll table.clear(_lllIIIlIlI) savebuffer_size = 0x1 if _lIIIlIIlll < currentsize or final then table.insert(chunks, { _IIIIllIlIl = currentsize, _IIIIIIIlIl = _lIlIIlIlIl }) _lIlIIlIlIl, currentsize = "", 0x0 end
+ if _IlIlllIllI then _IlIlllIllI.Text = "\083\097\118\105\110\103\046\046\032\083\105\122\101\058\032" .. _IIlIlIIIII() end
+ _lIIllIlIII() end
+ local function _lIlIlIlIII(className, _IIlIIlIIll) local _IIIIlllllI = Instance.new(className) local _IIlIIlIIIl = _llIlIlIIll(_IIIIlllllI.ClassName, _IIIIlllllI) for propertyName, val in _IIlIIlIIll do local _lIIllIlIII, _lIlllIIIIl, _IllIIIlllI if "\083\111\117\114\099\101" == propertyName then _IllIIIlllI = "\080\114\111\116\101\099\116\101\100\083\116\114\105\110\103" _lIlllIIIIl = _llIIlllIll.__PROTECTEDSTRING(val) _lIIllIlIII = true elseif "\078\097\109\101" == propertyName then _lIIllIlIII = true _lIlllIIIIl, _IllIIIlllI = _lllllIIllI(val, "\115\116\114\105\110\103") end
+ if _lIIllIlIII then _IIlIIlIIIl ..= _IllllllIlI(_IllIIIlllI, propertyName, _lIlllIIIIl) end
+ end
+ _IIlIIlIIIl ..= "\060\047\080\114\111\112\101\114\116\105\101\115\062" return _IIlIIlIIIl end
+ local function _IIIIlllIll(_llIlIIIIII) for _, instance in _llIlIIIIII do local _IlIlIIllll, ClassTagOverride, ClassNameOverride if not _IlIlIIllll then _IlIlIIllll = _llllIlllII[instance] if _IlIlIIllll then ClassTagOverride = _IlIlIIllll.__ClassName end
+ end
+ local _IlIlllIlIl = instance.ClassName local _IIIllIIlIl = instance.Name local _llllIlIIII if not ClassTagOverride then if _lllIlIlIIl and not instance.Archivable then continue end
+ _llllIlIIII = IgnoreList[instance] if _llllIlIIII then continue end
+ do local _lIlIlIlIII = IgnoreList[_IlIlllIlIl] if _lIlIlIlIII and (_lIlIlIlIII == true or _lIlIlIlIII[_IIIllIIlIl]) then continue end
+ end
+ if not _llIIlIIIII then _llIIlIIIII = _lIllIlllll[instance] if _llIIlIIIII == nil then local _lIIIlIllII = _lIllIlllll[_IlIlllIlIl] if _lIIIlIllII then _llIIlIIIII = _lIIIlIllII == true or _lIIIlIllII[_IIIllIIlIl] end
+ end
+ if _llIIlIIIII then _llIIlIIIII = instance elseif _llIIlIIIII == false then _llIIlIIIII = 0x1 end
+ end
+ do local _lIllIlIlII = NotCreatableFixes[_IlIlllIlIl] if _lIllIlIlII then if _llIllIIIll then _IlIlllIlIl, _IlIlIIllll = _lIllIlIlII, _llIllIlIII(instance, _IIIllIIlIl, _IlIlllIlIl) else continue end
+ else if _lIllllIlIl and instance:IsA("\080\097\114\116\079\112\101\114\097\116\105\111\110") then _IlIlllIlIl, _IlIlIIllll = "\080\097\114\116", _llIllIlIII(instance, _IIIllIIlIl, _IlIlllIlIl) ClassNameOverride = "\066\097\115\101\080\097\114\116" elseif not _lIlIlIlIII[_IlIlllIlIl] then if _lIIlIlIIIl then _lIIlIlIIIl("\067\108\097\115\115\032\110\111\116\032\070\111\117\110\100", _IlIlllIlIl) end
+ ClassTagOverride = _IlIlllIlIl _IlIlllIlIl = "\070\111\108\100\101\114" end
+ end
+ end
+ end
+ if _IlIlIIllll and _IlIlIIllll.__SaveSpecific then _lllIIIlIlI[savebuffer_size] = _lIlIlIlIII(_IlIlllIlIl, _IlIlIIllll.Properties) savebuffer_size += 0x1 else _lllIIIlIlI[savebuffer_size] = _llIlIlIIll(ClassTagOverride or _IlIlllIlIl, instance) savebuffer_size += 0x1 if not (_IlllIllIll and not _IlIIIlllIl(instance)) then local _llllIIllII, new_def_inst if _lllIllIIII then _llllIIllII = _llIlllllIl[_IlIlllIlIl] if not _llllIIllII then local _IIIIllIllI = _lIlIlIlIII[_IlIlllIlIl] if not _IIIIllIllI.NotCreatable then local _IlIIIIllII, _IllIIllllI = pcall(Instance.new, _IlIlllIlIl) if _IlIIIIllII then new_def_inst = _IllIIllllI _llllIIllII = {} _llIlllllIl[_IlIlllIlIl] = _llllIIllII else _IIIIllIllI.NotCreatable = true if _lIIlIlIIIl then _lIIlIlIIIl("\070\097\105\108\101\100\032\116\111\032\099\114\101\097\116\101\032\100\101\102\097\117\108\116\032\073\110\115\116\097\110\099\101", _IlIlllIlIl, _IllIIllllI) end
+ end
+ elseif _lIIlIlIIIl then _lIIlIlIIIl("\085\110\097\098\108\101\032\116\111\032\099\114\101\097\116\101\032\100\101\102\097\117\108\116\032\073\110\115\116\097\110\099\101\032\040\078\111\116\067\114\101\097\116\097\098\108\101\041", _IlIlllIlIl) end
+ end
+ end
+ for _, _IIIIIIlllI in _lllIIlIlIl(ClassNameOverride or _IlIlllIlIl) do local _lIlIIIIIII = _IIIIIIlllI.Name if IgnoreProperties[_lIlIIIIIII] then continue end
+ local _IlIlllIIlI = _IIIIIIlllI.ValueType if _lIlllIllll and _IlIlllIIlI == "\083\104\097\114\101\100\083\116\114\105\110\103" then continue end
+ local _IllllIIlll, Category, Optional = _IIIIIIlllI.Special, _IIIIIIlllI.Category, _IIIIIIlllI.Optional local _lIIlllIIII = _IIlIIIllII(instance, _IIIIIIlllI, _lIlIIIIIII, _IllllIIlll, Category, Optional) if _lIIlllIIII == _lllllIIllI then local _llIIlIIlIl, Fallback = _IIIIIIlllI.GHPFFailed, _IIIIIIlllI.Fallback if _llIIlIIlIl and not Fallback then continue end
+ if not _llIIlIIlIl then local _IlIIIIllII, _IllIIllllI = pcall(_lIIIIllllI, instance, _lIlIIIIIII) if _IllIIllllI == nil and not Optional then _IlIIIIllII = nil end
+ if _IlIIIIllII then _lIIlllIIII = _IllIIllllI else _llIIlIIlIl = true _IIIIIIlllI.GHPFFailed = _llIIlIIlIl end
+ end
+ if _llIIlIIlIl and Fallback then local _IlIIIIllII, _IllIIllllI = pcall(Fallback, instance) if _IlIIIIllII then _lIIlllIIII = _IllIIllllI else _IIIIIIlllI.Fallback = nil if _lIIlIlIIIl then _lIIlIlIIIl("\070\105\120\032\070\097\105\108\101\100", _lIlIIIIIII, _IllIIllllI) end
+ continue end
+ end
+ if _lIIlllIIII == _lllllIIllI then continue end
+ end
+ if _lllIlIlIlI and _IlIlllIIlI == "\066\105\110\097\114\121\083\116\114\105\110\103" then _IlIlllIIlI = "\083\104\097\114\101\100\083\116\114\105\110\103" end
+ if _llllIIllII and _IIIIIIlllI.CanRead and not _IIIIIIlllI.Special and not (_lIlIIIIIII == "\083\111\117\114\099\101" and _IlIIIlllIl(instance)) then if new_def_inst then _llllIIllII[_lIlIIIIIII] = _llllIlIlll(new_def_inst, _lIlIIIIIII) end
+ if _llllIIllII[_lIlIIIIIII] == _lIIlllIIII then continue end
+ end
+ local _IllIIIlllI, _lIlllIIIIl if Category == "\067\108\097\115\115" then _IllIIIlllI = "\082\101\102" if _lIIlllIIII then if SaveNotCreatableWillBeEnabled then local _lIllIlIlII = NotCreatableFixes[_lIIlllIIII.ClassName] if _lIllIlIlII and ( _lIlIIIIIII == "\080\108\097\121\101\114\084\111\072\105\100\101\070\114\111\109" or _IlIlllIIlI ~= "\073\110\115\116\097\110\099\101" and _IlIlllIIlI ~= _lIllIlIlII ) then continue end
+ end
+ _lIlllIIIIl = _IIlIIlIIll(_lIIlllIIII) else _lIlllIIIIl = "\110\117\108\108" end
+ elseif Category == "\069\110\117\109" then _lIlllIIIIl, _IllIIIlllI = _llIIlllIll.EnumItem(_lIIlllIIII) else local _lIllIIIllI = _llIIlllIll[_IlIlllIIlI] if _lIllIIIllI then _lIlllIIIIl, _IllIIIlllI = _lllllIIllI(_lIIlllIIII, _IlIlllIIlI, _lIllIIIllI) elseif "\080\114\111\116\101\099\116\101\100\083\116\114\105\110\103" == _IlIlllIIlI then _IllIIIlllI = _IlIlllIIlI if _lIlIIIIIII == "\083\111\117\114\099\101" then if _llIIlIIIII then if _llIIlIIIII == 0x1 then _llIIlIIIII = nil end
+ _lIlllIIIIl = "\045\045\032\073\103\110\111\114\101\100" else local _IIlIlIIIIl = true local _IIIllIIlll local _IllIlIlIII = instance.LinkedSource local _IIllIlIIII = _IllIlIlIII ~= "" local _lIIIlIlIII if _IIllIlIIII then local _IlIlllllIl = instance:GetFullName() if RecoveredScripts then table.insert(RecoveredScripts, _IlIlllllIl) end
+ _IIIllIIlll = string.match(_IllIlIlIII, "\037\119\043\036") if _IIIllIIlll then if _IllllllIII then local _IIlIIIIlII = _lIIIlIllII[_IIIllIIlll] if _IIlIIIIlII then _lIlllIIIIl = _IIlIIIIlII _IIlIlIIIIl = nil end
+ end
+ if _IIlIlIIIIl then if _llllllllll then _lIlllIIIIl = "\045\045\032\078\111\116\032\102\111\117\110\100\032\105\110\032\076\105\110\107\101\100\083\111\117\114\099\101\032\083\099\114\105\112\116\067\097\099\104\101" _IIlIlIIIIl = nil end
+ _lIIIlIlIII = string.find(_IIIllIIlll, "\037\097") and "\104\097\115\104" or "\105\100" local _llIllIIIlI = _lIIIlIlIII .. "\061" .. _IIIllIIlll local _IlIIIIllII, source = pcall( function () return game:HttpGet( "\104\116\116\112\115\058\047\047\097\115\115\101\116\100\101\108\105\118\101\114\121\046\114\111\112\114\111\120\121\046\099\111\109\047\118\049\047\097\115\115\101\116\047\063" .. _llIllIIIlI ) end
+ ) if _IlIIIIllII and _lllIllIIII(source) then if _IllllllIII then _lIIIlIllII[_IIIllIIlll] = source end
+ _lIlllIIIIl = source _IIlIlIIIIl = nil end
+ end
+ else warn( "\070\065\073\076\069\068\032\084\079\032\069\088\084\082\065\067\084\032\079\082\073\071\073\078\065\076\032\083\067\082\073\080\084\032\083\079\085\082\067\069\032\040\079\080\069\078\032\065\032\071\073\084\072\085\066\032\073\083\083\085\069\041\058\032", instance:GetFullName(), _IllIlIlIII ) end
+ end
+ if _IIlIlIIIIl then local _lIIIIllIlI = instance:IsA("\076\111\099\097\108\083\099\114\105\112\116") if _lIIIIllIlI and instance.RunContext == Enum.RunContext.Server or not _lIIIIllIlI and instance:IsA("\083\099\114\105\112\116") and instance.RunContext ~= Enum.RunContext.Client then _lIlllIIIIl = "\045\045\032\091\070\105\108\116\101\114\105\110\103\069\110\097\098\108\101\100\093\032\083\101\114\118\101\114\032\083\099\114\105\112\116\115\032\097\114\101\032\073\077\080\079\083\083\073\066\076\069\032\116\111\032\115\097\118\101" else if _llllllIlll.usekonstantdecompiler then _lIlllIIIIl = _IlIllIllIl.decompile(instance) else _lIlllIIIIl = ldecompile(instance) end
+ if _IllIlIIlll then local _llllllllIl = _IllIlIIlll(instance) if _llllllllIl then _lIlllIIIIl = _llllllllIl .. _lIlllIIIIl end
+ end
+ end
+ end
+ _lIlllIIIIl = "\045\045\032\068\101\099\111\109\112\105\108\101\100\032\098\121\032\086\105\099\105\111\117\115\086\097\117\108\116\032\040\074\111\105\110\032\116\111\032\067\111\112\121\032\071\097\109\101\115\041\032\104\116\116\112\115\058\047\047\100\105\115\099\111\114\100\046\099\111\109\047\105\110\118\105\116\101\047\067\051\101\107\103\122\117\120\070\121\092\110\092\110" .. (_IIllIlIIII and "\045\045\032\079\114\105\103\105\110\097\108\032\083\111\117\114\099\101\058\032\104\116\116\112\115\058\047\047\097\115\115\101\116\100\101\108\105\118\101\114\121\046\114\111\098\108\111\120\046\099\111\109\047\118\049\047\097\115\115\101\116\047\063" .. (_lIIIlIlIII or "\105\100") .. "\061" .. (_IIIllIIlll or _IllIlIlIII) .. "\092\110\092\110" or "") .. _lIlllIIIIl end
+ end
+ _lIlllIIIIl = _llIIlllIll.__PROTECTEDSTRING(_lIlllIIIIl) else if Optional then _lIllIIIllI = _llIIlllIll[Optional] if _lIllIIIllI then if _lIIlllIIII == nil then continue else _lIlllIIIIl, _IllIIIlllI = _lllllIIllI(_lIIlllIIII, _IlIlllIIlI, _lIllIIIllI) end
+ end
+ end
+ end
+ end
+ if _IllIIIlllI then _lllIIIlIlI[savebuffer_size] = _IllllllIlI(_IllIIIlllI, _lIlIIIIIII, _lIlllIIIIl) savebuffer_size += 0x1 else warn("\085\078\083\085\080\080\079\082\084\069\068\032\084\089\080\069\032\040\079\080\069\078\032\065\032\071\073\084\072\085\066\032\073\083\083\085\069\041\058\032", _IlIlllIIlI, _IlIlllIlIl, _lIlIIIIIII) end
+ end
+ end
+ _lllIIIlIlI[savebuffer_size] = "\060\047\080\114\111\112\101\114\116\105\101\115\062" savebuffer_size += 0x1 if _lIIIIIlIlI < savebuffer_size then _IllIlIlIlI() end
+ end
+ if _llllIlIIII ~= false then local _IIlIlllIII = _IlIlIIllll and _IlIlIIllll.__Children or instance:GetChildren() if #_IIlIlllIII ~= 0x0 then _IIIIlllIll(_IIlIlllIII) end
+ end
+ if _llIIlIIIII and _llIIlIIIII == instance then _llIIlIIIII = nil end
+ _lllIIIlIlI[savebuffer_size] = "\060\047\073\116\101\109\062" savebuffer_size += 0x1 end
+ end
+ local function _llIlIIlIlI(_lIllIIlIll, instanceOrTable, saveProps, customClassName, source) if not customClassName then customClassName = "\070\111\108\100\101\114" end
+ local _IIlIIlIIll = { Name = _lIllIIlIll, Source = source } local _llIlIIIIII if instanceOrTable then if type(instanceOrTable) == "\116\097\098\108\101" then _llIlIIIIII = instanceOrTable else _llIlIIIIII = instanceOrTable:GetChildren() if saveProps then _llllIlllII[instanceOrTable] = { __ClassName = customClassName, __Children = _llIlIIIIII, _IlIllIIlIl = _IIlIIlIIll, } _IIIIlllIll({ instanceOrTable }) end
+ end
+ end
+ if not saveProps then _lllIIIlIlI[savebuffer_size] = _lIlIlIlIII(customClassName, _IIlIIlIIll) savebuffer_size += 0x1 if _llIlIIIIII then _IIIIlllIll(_llIlIIIIII) end
+ _lllIIIlIlI[savebuffer_size] = "\060\047\073\116\101\109\062" savebuffer_size += 0x1 end
+ end
+ local function _llIlIlllII() do if _llIlIllIll then _lllllIlIII ..= "\060\077\101\116\097\032\110\097\109\101\061\034\069\120\112\108\105\099\105\116\065\117\116\111\074\111\105\110\116\115\034\062\116\114\117\101\060\047\077\101\116\097\062" end
+ if _IlIIlllIll and not _llllllIlll.Callback then _IlIIlllIll(placename, _lllllIlIII) end
+ end
+ SaveNotCreatableWillBeEnabled = _llIllIIIll or (_lllIllllII or _lIIIlllIIl) and _lllIllllII or _IlllIlIIll or _lIlIlllllI and _lIIIlllIll.getnilinstances local _llIlIlIlII if _llllllIlll.WatermarkGui then local _IIIIlIlIII = Instance.new("\083\099\114\101\101\110\071\117\105") local _lIlllIIlIl = Instance.new("\070\114\097\109\101") local _llllIllIlI = Instance.new("\084\101\120\116\076\097\098\101\108") local _IllIIllIIl = Instance.new("\085\073\065\115\112\101\099\116\082\097\116\105\111\067\111\110\115\116\114\097\105\110\116") local _IIIlllllIl = Instance.new("\085\073\084\101\120\116\083\105\122\101\067\111\110\115\116\114\097\105\110\116") local _lIIlllIllI = Instance.new("\084\101\120\116\076\097\098\101\108") local _llIlIIlIIl = Instance.new("\085\073\071\114\097\100\105\101\110\116") local _lIIlIIIlll = Instance.new("\084\101\120\116\076\097\098\101\108") local _llllllllII = Instance.new("\084\101\120\116\076\097\098\101\108") local _IllIIIIlIl = Instance.new("\085\073\071\114\097\100\105\101\110\116") _IIIIlIlIII.Name = "\068\069\076\069\084\069\032\077\069" _IIIIlIlIII.Parent = game.Players.LocalPlayer:WaitForChild("\080\108\097\121\101\114\071\117\105") _IIIIlIlIII.ZIndexBehavior = Enum.ZIndexBehavior.Sibling _IIIIlIlIII.DisplayOrder = 0x5F5E100 _lIlllIIlIl.Name = "\066\097\099\107\103\114\111\117\110\100" _lIlllIIlIl.Parent = _IIIIlIlIII _lIlllIIlIl.AnchorPoint = Vector2.new(0.5, 0.5) _lIlllIIlIl.BackgroundColor3 = Color3.fromRGB(0x0, 0x0, 0x0) _lIlllIIlIl.BackgroundTransparency = 0.150 _lIlllIIlIl.BorderColor3 = Color3.fromRGB(0x0, 0x0, 0x0) _lIlllIIlIl.BorderSizePixel = 0x0 _lIlllIIlIl.Position = UDim2.new(0.5, 0x0, 0.5, 0x0) _lIlllIIlIl.Size = UDim2.new(0x1, 0x0, 0x1, 0x0) _lIlllIIlIl.ZIndex = 0x2710 _llllIllIlI.Name = "\066\097\099\107\103\114\111\117\110\100\084\101\120\116" _llllIllIlI.Parent = _lIlllIIlIl _llllIllIlI.AnchorPoint = Vector2.new(0.5, 0.5) _llllIllIlI.BackgroundColor3 = Color3.fromRGB(0xFF, 0xFF, 0xFF) _llllIllIlI.BackgroundTransparency = 1.000 _llllIllIlI.BorderColor3 = Color3.fromRGB(0x0, 0x0, 0x0) _llllIllIlI.BorderSizePixel = 0x0 _llllIllIlI.Position = UDim2.new(0.5, 0x0, 0.5, 0x0) _llllIllIlI.Size = UDim2.new(1.29999995, 0x0, 1.29999995, 0x0) _llllIllIlI.Font = Enum.Font.Fondamento _llllIllIlI.Text = "\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032\086\105\099\105\111\117\115\086\097\117\108\116\032" _llllIllIlI.TextColor3 = Color3.fromRGB(0xFF, 0xFF, 0xFF) _llllIllIlI.TextScaled = true _llllIllIlI.TextSize = 14.000 _llllIllIlI.TextTransparency = 0.780 _llllIllIlI.TextWrapped = true _IllIIllIIl.Parent = _llllIllIlI _IllIIllIIl.AspectRatio = 2.172 _IIIlllllIl.Parent = _llllIllIlI _lIIlllIllI.Parent = _lIlllIIlIl _lIIlllIllI.BackgroundColor3 = Color3.fromRGB(0xFF, 0xFF, 0xFF) _lIIlllIllI.BackgroundTransparency = 1.000 _lIIlllIllI.BorderColor3 = Color3.fromRGB(0x0, 0x0, 0x0) _lIIlllIllI.BorderSizePixel = 0x0 _lIIlllIllI.Position = UDim2.new(0.120823897, 0x0, 0.515295148, 0x0) _lIIlllIllI.Size = UDim2.new(0.757939637, 0x0, 0.397691697, 0x0) _lIIlllIllI.Font = Enum.Font.GothamBlack _lIIlllIllI.Text = "\104\116\116\112\115\058\047\047\100\105\115\099\111\114\100\046\103\103\047\067\051\101\107\103\122\117\120\070\121" _lIIlllIllI.TextColor3 = Color3.fromRGB(0xFF, 0x0, 0x0) _lIIlllIllI.TextScaled = true _lIIlllIllI.TextSize = 14.000 _lIIlllIllI.TextWrapped = true _llIlIIlIIl.Color = ColorSequence.new{ColorSequenceKeypoint.new(0.00, Color3.fromRGB(0xFF, 0xFF, 0xFF)), ColorSequenceKeypoint.new(1.00, Color3.fromRGB(0x0, 0x0, 0x0))} _llIlIIlIIl.Rotation = 0x5A _llIlIIlIIl.Parent = _lIIlllIllI _lIIlIIIlll.Parent = _lIlllIIlIl _lIIlIIIlll.BackgroundColor3 = Color3.fromRGB(0xFF, 0xFF, 0xFF) _lIIlIIIlll.BackgroundTransparency = 1.000 _lIIlIIIlll.BorderColor3 = Color3.fromRGB(0x0, 0x0, 0x0) _lIIlIIIlll.BorderSizePixel = 0x0 _lIIlIIIlll.Position = UDim2.new(0.162435502, 0x0, 0.340259612, 0x0) _lIIlIIIlll.Size = UDim2.new(0.694848061, 0x0, 0.298701286, 0x0) _lIIlIIIlll.Font = Enum.Font.GothamBlack _lIIlIIIlll.Text = "\084\104\105\115\032\119\097\115\032\100\101\099\111\109\112\105\108\101\100\032\098\121\032\086\105\099\105\111\117\115\086\097\117\108\116\032\047\032\074\079\073\078\032\079\085\082\032\068\073\083\067\079\082\068\032\070\079\082\032\077\079\082\069\032\070\073\076\069\083" _lIIlIIIlll.TextColor3 = Color3.fromRGB(0xAA, 0x0, 0xFF) _lIIlIIIlll.TextScaled = true _lIIlIIIlll.TextSize = 14.000 _lIIlIIIlll.TextWrapped = true _llllllllII.Parent = _lIlllIIlIl _llllllllII.BackgroundColor3 = Color3.fromRGB(0xFF, 0xFF, 0xFF) _llllllllII.BackgroundTransparency = 1.000 _llllllllII.BorderColor3 = Color3.fromRGB(0x0, 0x0, 0x0) _llllllllII.BorderSizePixel = 0x0 _llllllllII.Position = UDim2.new(0.162435502, 0x0, 0.0857141763, 0x0) _llllllllII.Size = UDim2.new(0.694848061, 0x0, 0.298701286, 0x0) _llllllllII.Font = Enum.Font.GothamBlack _llllllllII.Text = "\086\105\099\105\111\117\115\086\097\117\108\116\032\047\032\086\086" _llllllllII.TextColor3 = Color3.fromRGB(0xFF, 0xFF, 0xFF) _llllllllII.TextScaled = true _llllllllII.TextSize = 14.000 _llllllllII.TextWrapped = true _IllIIIIlIl.Color = ColorSequence.new{ColorSequenceKeypoint.new(0.00, Color3.fromRGB(0xFF, 0xFF, 0xFF)), ColorSequenceKeypoint.new(1.00, Color3.fromRGB(0x0, 0x0, 0x0))} _IllIIIIlIl.Rotation = -0x5A _IllIIIIlIl.Parent = _llllllllII _IIIIlIlIII.Parent = _llIlllIIll.StarterGui _llIlIlIlII = _IIIIlIlIII end
+ local _lIIllIIlll, ScriptsDone if not _llllllIlll.noscripts and not _llllllllll then _lIIllIIlll, ScriptsDone = 0x0, 0x0 for _, service_or_inst in ToSaveList do for _, desc in service_or_inst:GetDescendants() do if _IlIIIlllIl(desc) then _lIIllIIlll += 0x1 end
+ end
+ end
+ end
+ _IIIIlllIll(ToSaveList) if _llIlIlIlII then _llIlIlIlII:Destroy() end
+ if _lllIllllII or _lIIIlllIIl then local _IllIIIllIl = _llIlllIIll.Players.LocalPlayer if _IllIIIllIl then if _lllIllllII then _llIllIIIll = true _llIlIIlIlI("\076\111\099\097\108\080\108\097\121\101\114", _IllIIIllIl, true) end
+ if _lIIIlllIIl then local _IlIlIIlIlI = _IllIIIllIl.Character if _IlIlIIlIlI then _llIlIIlIlI("\076\111\099\097\108\080\108\097\121\101\114\032\067\104\097\114\097\099\116\101\114", _IlIlIIlIlI, true, "\077\111\100\101\108") end
+ end
+ end
+ end
+ if _llllllIlll.WatermarkGui then pcall( function () _IIIIlIlIII:Destroy() end
+ ) end
+ if _IIIIIIllIl then _llIlIIlIlI("\083\116\097\114\116\101\114\080\108\097\121\101\114", _llIlllIIll.StarterPlayer) end
+ if _IlllIlIIll then _llIllIIIll = true _llIlIIlIlI("\080\108\097\121\101\114\115", _llIlllIIll.Players) end
+ if _lIlIlllllI and _lIIIlllIll.getnilinstances then local _IlIIllIllI, nil_instances_size = {}, 0x1 local _IIllllIllI = _llllllIlll.NilInstancesFixes for _, instance in _lIIIlllIll.getnilinstances() do if instance == game then instance = nil else local _IlIlllIlIl = instance.ClassName local _lIllIlIlII = _llIIIIIIlI(_IIllllIllI, _IlIlllIlIl, instance) if _lIllIlIlII then instance = _lIllIlIlII(instance, _llllIlllII) end
+ local _IIIIllIllI = _lIlIlIlIII[_IlIlllIlIl] if _IIIIllIllI then if _IIIIllIllI.Service then instance = nil end
+ end
+ end
+ if instance then _IlIIllIllI[nil_instances_size] = instance nil_instances_size += 0x1 end
+ end
+ _llIllIIIll = true _llIlIIlIlI("\078\105\108\032\073\110\115\116\097\110\099\101\115", _IlIIllIllI) end
+ if _llllllIlll.ReadMe then _llIlIIlIlI( "\082\069\065\068\077\069", nil, nil, "\083\099\114\105\112\116", "\045\045\091\091\092\110" .. (#RecoveredScripts ~= 0x0 and "\092\116\092\116\073\077\080\079\082\084\065\078\084\058\032\079\114\105\103\105\110\097\108\032\083\111\117\114\099\101\032\111\102\032\116\104\101\115\101\032\083\099\114\105\112\116\115\032\119\097\115\032\082\101\099\111\118\101\114\101\100\058\032" .. _llIlllIIll.HttpService:JSONEncode( RecoveredScripts ) .. "\092\110" or "") .. "\091\010\009\009\084\104\097\110\107\032\121\111\117\032\102\111\114\032\117\115\105\110\103\032\086\105\099\105\111\117\115\086\097\117\108\116\032\040\074\111\105\110\032\116\111\032\067\111\112\121\032\071\097\109\101\115\041\032\104\116\116\112\115\058\047\047\100\105\115\099\111\114\100\046\099\111\109\047\105\110\118\105\116\101\047\067\051\101\107\103\122\117\120\070\121\046\010\010\009\009\073\102\032\121\111\117\032\100\105\100\110\039\116\032\115\097\118\101\032\105\110\032\066\105\110\097\114\121\032\040\114\098\120\108\041\032\045\032\105\116\039\115\032\114\101\099\111\109\109\101\110\100\101\100\032\116\111\032\115\097\118\101\032\116\104\101\032\103\097\109\101\032\114\105\103\104\116\032\097\119\097\121\032\116\111\032\116\097\107\101\032\097\100\118\097\110\116\097\103\101\032\111\102\032\116\104\101\032\098\105\110\097\114\121\032\102\111\114\109\097\116\032\038\032\116\111\032\112\114\101\115\101\114\118\101\032\118\097\108\117\101\115\032\111\102\032\099\101\114\116\097\105\110\032\112\114\111\112\101\114\116\105\101\115\032\105\102\032\121\111\117\032\117\115\101\100\032\073\103\110\111\114\101\068\101\102\097\117\108\116\080\114\111\112\101\114\116\105\101\115\032\115\101\116\116\105\110\103\032\040\097\115\032\116\104\101\121\032\109\105\103\104\116\032\099\104\097\110\103\101\032\105\110\032\116\104\101\032\102\117\116\117\114\101\041\046\010\009\009\089\111\117\032\099\097\110\032\100\111\032\116\104\097\116\032\098\121\032\103\111\105\110\103\032\116\111\032\070\073\076\069\032\045\062\032\083\097\118\101\032\116\111\032\070\105\108\101\032\065\115\032\045\062\032\077\097\107\101\032\115\117\114\101\032\070\105\108\101\032\078\097\109\101\032\101\110\100\115\032\119\105\116\104\032\046\114\098\120\108\032\045\062\032\083\097\118\101\010\010\009\009\083\101\114\118\101\114\083\116\111\114\097\103\101\044\032\083\101\114\118\101\114\083\099\114\105\112\116\083\101\114\118\105\099\101\032\097\110\100\032\083\101\114\118\101\114\032\083\099\114\105\112\116\115\032\097\114\101\032\073\077\080\079\083\083\073\066\076\069\032\116\111\032\115\097\118\101\032\098\101\099\097\117\115\101\032\111\102\032\070\105\108\116\101\114\105\110\103\069\110\097\098\108\101\100\046\010\010\009\009\073\102\032\121\111\117\114\032\112\108\097\121\101\114\032\099\097\110\110\111\116\032\115\112\097\119\110\032\105\110\116\111\032\116\104\101\032\103\097\109\101\044\032\112\108\101\097\115\101\032\109\111\118\101\032\116\104\101\032\115\099\114\105\112\116\115\032\105\110\032\083\116\097\114\116\101\114\080\108\097\121\101\114\032\115\111\109\101\119\104\101\114\101\032\101\108\115\101\032\111\114\032\100\101\108\101\116\101\032\116\104\101\109\046\032\084\104\101\110\032\114\117\110\032\096\103\097\109\101\058\071\101\116\083\101\114\118\105\099\101\040\034\080\108\097\121\101\114\115\034\041\046\067\104\097\114\097\099\116\101\114\065\117\116\111\076\111\097\100\115\032\061\032\116\114\117\101\096\046\010\009\009\065\110\100\032\117\115\101\032\034\080\108\097\121\032\072\101\114\101\034\032\116\111\032\115\116\097\114\116\032\103\097\109\101\032\105\110\115\116\101\097\100\032\111\102\032\034\080\108\097\121\034\032\116\111\032\115\112\097\119\110\032\121\111\117\114\032\067\104\097\114\097\099\116\101\114\032\119\104\101\114\101\032\121\111\117\114\032\067\097\109\101\114\097\032\099\117\114\114\101\110\116\108\121\032\105\115\046\010\010\009\009\073\102\032\116\104\101\032\099\104\097\116\032\115\121\115\116\101\109\032\100\111\101\115\032\110\111\116\032\119\111\114\107\044\032\112\108\101\097\115\101\032\117\115\101\032\116\104\101\032\101\120\112\108\111\114\101\114\032\097\110\100\032\100\101\108\101\116\101\032\101\118\101\114\121\116\104\105\110\103\032\105\110\115\105\100\101\032\116\104\101\032\084\101\120\116\067\104\097\116\083\101\114\118\105\099\101\047\067\104\097\116\032\115\101\114\118\105\099\101\040\115\041\046\032\010\009\009\079\114\032\114\117\110\032\096\103\097\109\101\058\071\101\116\083\101\114\118\105\099\101\040\034\067\104\097\116\034\041\058\067\108\101\097\114\065\108\108\067\104\105\108\100\114\101\110\040\041\032\103\097\109\101\058\071\101\116\083\101\114\118\105\099\101\040\034\084\101\120\116\067\104\097\116\083\101\114\118\105\099\101\034\041\058\067\108\101\097\114\065\108\108\067\104\105\108\100\114\101\110\040\041\096\010\009\009\009\009\010\009\009\073\102\032\085\110\105\111\110\032\097\110\100\032\077\101\115\104\080\097\114\116\032\099\111\108\108\105\115\105\111\110\115\032\100\111\110\039\116\032\119\111\114\107\044\032\114\117\110\032\116\104\101\032\115\099\114\105\112\116\032\098\101\108\111\119\032\105\110\032\116\104\101\032\083\116\117\100\105\111\032\067\111\109\109\097\110\100\032\066\097\114\058\010\009\009\009\009\010\009\009\009\009\010\009\009\108\111\099\097\108\032\067\032\061\032\103\097\109\101\058\071\101\116\083\101\114\118\105\099\101\040\034\067\111\114\101\071\117\105\034\041\010\009\009\108\111\099\097\108\032\068\032\061\032\069\110\117\109\046\067\111\108\108\105\115\105\111\110\070\105\100\101\108\105\116\121\046\068\101\102\097\117\108\116\010\009\009\009\009\010\009\009\102\111\114\032\095\044\032\118\032\105\110\032\103\097\109\101\058\071\101\116\068\101\115\099\101\110\100\097\110\116\115\040\041\032\100\111\010\009\009\009\105\102\032\118\058\073\115\065\040\034\084\114\105\097\110\103\108\101\077\101\115\104\080\097\114\116\034\041\032\097\110\100\032\110\111\116\032\118\058\073\115\068\101\115\099\101\110\100\097\110\116\079\102\040\067\041\032\116\104\101\110\010\009\009\009\009\118\046\067\111\108\108\105\115\105\111\110\070\105\100\101\108\105\116\121\032\061\032\068\010\009\009\009\101\110\100\010\009\009\101\110\100\010\009\009\112\114\105\110\116\040\034\068\111\110\101\034\041\010\009\009\009\009\010\009\009\073\102\032\121\111\117\032\099\097\110\039\116\032\109\111\118\101\032\116\104\101\032\067\097\109\101\114\097\044\032\114\117\110\032\116\104\105\115\032\115\099\114\105\112\116\032\105\110\032\116\104\101\032\083\116\117\100\105\111\032\067\111\109\109\097\110\100\032\066\097\114\058\010\009\009\009\010\009\009\119\111\114\107\115\112\097\099\101\046\067\117\114\114\101\110\116\067\097\109\101\114\097\046\067\097\109\101\114\097\084\121\112\101\032\061\032\069\110\117\109\046\067\097\109\101\114\097\084\121\112\101\046\070\105\120\101\100\010\009\009\010\009\009\079\114\032\068\101\115\116\114\111\121\032\116\104\101\032\067\097\109\101\114\097\046\010\010\009\009\084\104\105\115\032\102\105\108\101\032\119\097\115\032\103\101\110\101\114\097\116\101\100\032\119\105\116\104\032\116\104\101\032\102\111\108\108\111\119\105\110\103\032\115\101\116\116\105\110\103\115\058\010\009\009\093" .. _llIlllIIll.HttpService:JSONEncode(_llllllIlll) .. "\092\110\092\110\092\116\092\116\069\108\097\112\115\101\100\032\116\105\109\101\058\032" .. os.clock() - elapse_t .. "\032\080\108\097\099\101\073\100\058\032" .. game.PlaceId .. "\032\080\108\097\099\101\086\101\114\115\105\111\110\058\032" .. game.PlaceVersion .. "\032\067\108\105\101\110\116\032\086\101\114\115\105\111\110\058\032" .. _llllIlIIIl() .. "\032\069\120\101\099\117\116\111\114\058\032" .. (_IlIlIIIIlI and table.concat({ _IlIlIIIIlI() }, "\032") or "\085\110\107\110\111\119\110") .. "\092\110\093\093" ) end
+ do local _lllllIlllI = { "\060\083\104\097\114\101\100\083\116\114\105\110\103\115\062" } for identifier, _lIlllIIIIl in _lIIllIIllI do table.insert(_lllllIlllI, "\060\083\104\097\114\101\100\083\116\114\105\110\103\032\109\100\053\061\034" .. identifier .. "\034\062" .. _lIlllIIIIl .. "\060\047\083\104\097\114\101\100\083\116\114\105\110\103\062") end
+ if 0x1 < #_lllllIlllI then _lllIIIlIlI[savebuffer_size] = table.concat(_lllllIlllI) savebuffer_size += 0x1 _lllIIIlIlI[savebuffer_size] = "\060\047\083\104\097\114\101\100\083\116\114\105\110\103\115\062" savebuffer_size += 0x1 end
+ end
+ _lllIIIlIlI[savebuffer_size] = "\060\047\114\111\098\108\111\120\062\060\033\045\045\032\068\101\099\111\109\112\105\108\101\100\032\098\121\032\086\105\099\105\111\117\115\086\097\117\108\116\032\040\074\111\105\110\032\116\111\032\067\111\112\121\032\071\097\109\101\115\041\032\104\116\116\112\115\058\047\047\100\105\115\099\111\114\100\046\099\111\109\047\105\110\118\105\116\101\047\067\051\101\107\103\122\117\120\070\121\032\045\045\062" savebuffer_size += 0x1 _IllIlIlIlI(true) do if _llllllIlll.Anonymous then local _IllIIIllIl = _llIlllIIll.Players.LocalPlayer if _IllIIIllIl then local function _IIIlIlllIl(input, search, replacement) local _IlIlIlllIl = string.lower(input) search = string.lower(search) local _llllIIlIlI = 0x0 local _lIIlIllIII = {} local _lIlllIIIII = #search local _IlIlIlIIll = #input while _lIlllIIIII <= _IlIlIlIIll - _llllIIlIlI do local _llIIIlIIIl = _llllIIlIlI + 0x1 local _IIlllIlIlI, finish = string.find(_IlIlIlllIl, search, _llIIIlIIIl, true) if _IIlllIlIlI == nil then break end
+ table.insert(_lIIlIllIII, string.sub(input, _llIIIlIIIl, _IIlllIlIlI - 0x1)) _llllIIlIlI = finish end
+ if _llllIIlIlI == 0x0 then return input end
+ table.insert(_lIIlIllIII, string.sub(input, _llllIIlIlI + 0x1)) return table.concat(_lIIlIllIII, replacement) end
+ local _IIIIlIlIll = type(_llllllIlll.Anonymous) == "\116\097\098\108\101" and _llllllIlll.Anonymous or { UserId = "\049", Name = "\082\111\098\108\111\120" } for _, _llIllllllI in chunks do _llIllllllI.str = _IIIlIlllIl( string.gsub(_llIllllllI.str, _IllIIIllIl.UserId, _IIIIlIlIll.UserId), _IllIIIllIl.Name, _IIIIlIlIll.Name ) end
+ end
+ end
+ local _IlllllIlII = _llllllIlll.Callback local _llIllIIlll = _llllllIlll.AlternativeWritefile local _IllIIIlIII = 0x3F4240 if _IlllllIlII then local _IlIIIllIlI = {_lllllIlIII} for i = 0x1, #chunks do _IlIIIllIlI[#_IlIIIllIlI+0x1] = chunks[i].str end
+ local _IlIllIIlll = table.concat(_IlIIIllIlI) _IlllllIlII(_IlIllIIlll, chunks, _llIIIIlIlI) elseif _llIllIIlll and _lIlllIIlll then local _IIllIlllII = math.ceil(_llIIIIlIlI / _IllIIIlIII) local _lllIlIIllI = 0x1 for _lIIIlllllI = 0x1, #chunks do local _llIllllllI = chunks[_lIIIlllllI] local _IIIIIIIlIl = _llIllllllI.str local _IIIIllIlIl = _llIllllllI.size local _llIIIIIIIl = math.ceil(_IIIIllIlIl / _IllIIIlIII) for i = 0x1, _llIIIIIIIl do local _lllIlIlllI = (i - 0x1) * _IllIIIlIII + 0x1 local _IIIlIIIIII = i * _IllIIIlIII local _llIlIIllII = string.sub(_IIIIIIIlIl, _lllIlIlllI, _IIIlIIIIII) _IllIlllIlI( "\087\114\105\116\105\110\103\032\116\111\032\070\105\108\101\032" .. math.round(_lllIlIIllI / _IIllIlllII * 0x64) .. "\037", nil, true, _lIlllIIlll, placename, _llIlIIllII ) _lllIlIIllI = _lllIlIIllI + 0x1 if i ~= _llIIIIIIIl then task.wait() end
+ end
+ end
+ else local _IlIIIllIlI = {_lllllIlIII} for i = 0x1, #chunks do _IlIIIllIlI[#_IlIIIllIlI+0x1] = chunks[i].str end
+ local _IlIllIIlll = table.concat(_IlIIIllIlI) _IllIlllIlI( "\087\114\105\116\105\110\103\032" .. _IIlIlIIIII() .. "\032\116\111\032\070\105\108\101", nil, true, _IlIIlllIll, placename, _IlIllIIlll ) end
+ end
+ table.clear(_lIIllIIllI) end
+ local _IIIIlIllII do local Players = _llIlllIIll.Players if IgnoreList.Model ~= true then _IIIIlIllII = {} local function _llllIlllII(player) table.insert( _IIIIlIllII, player.CharacterAdded:Connect( function (character) IgnoreList[character] = true end
+ ) ) local _IllIllIIlI = player.Character if _IllIllIIlI then IgnoreList[_IllIllIIlI] = true end
+ end
+ if _llllllIlll.RemovePlayerCharacters then table.insert( _IIIIlIllII, Players.PlayerAdded:Connect( function (player) _llllIlllII(player) end
+ ) ) for _, player in Players:GetPlayers() do _llllIlllII(player) end
+ else _lllIlIlIIl = false if _lIIIlllIIl then task.spawn( function () _llllIlllII(_IlIllllllI()) end
+ ) end
+ end
+ end
+ if _lllIllllII and IgnoreList.Player ~= true then task.spawn( function () IgnoreList[_IlIllllllI()] = true end
+ ) end
+ end
+ if _IIIIIIllIl then IgnoreList.StarterPlayer = false end
+ if _IlllIlIIll then IgnoreList.Players = false end
+ if _llllllIlll.ShowStatus then do local _IllIIllIII = _lIIlllIllI._statustext if _IllIIllIII then _IllIIllIII:Destroy() end
+ end
+ local _llIIlllIII = Instance.new("\083\099\114\101\101\110\071\117\105") _lIIlllIllI._statustext = _llIIlllIII _llIIlllIII.DisplayOrder = 2e9 pcall( function () _llIIlllIII.OnTopOfCoreBlur = true end
+ ) _IlIlllIllI = Instance.new("\084\101\120\116\076\097\098\101\108") _IlIlllIllI.Text = "\083\097\118\105\110\103\046\046\046" _IlIlllIllI.BackgroundTransparency = 0x1 _IlIlllIllI.Font = Enum.Font.Code _IlIlllIllI.AnchorPoint = Vector2.new(0x1) _IlIlllIllI.Position = UDim2.new(0x1) _IlIlllIllI.Size = UDim2.new(0.3, 0x0, 0x0, 0x14) _IlIlllIllI.TextColor3 = Color3.new(0x1, 0x1, 0x1) _IlIlllIllI.TextScaled = true _IlIlllIllI.TextStrokeTransparency = 0.7 _IlIlllIllI.TextXAlignment = Enum.TextXAlignment.Right _IlIlllIllI.TextYAlignment = Enum.TextYAlignment.Top _IlIlllIllI.Parent = _llIIlllIII local function _IIIIIIIIII() local _llIIIIIIIl = math.random(0xA, 0x14) local _IIIIIlllIl = table.create(_llIIIIIIIl) for i = 0x1, _llIIIIIIIl do _IIIIIlllIl[i] = string.char(math.random(0x20, 0x7E)) end
+ return table.concat(_IIIIIlllIl) end
+ if _lIIIlllIll.gethui then _llIIlllIII.Name = _IIIIIIIIII() _llIIlllIII.Parent = _lIIIlllIll.gethui() else if _lIIIlllIll.protectgui then _llIIlllIII.Name = _IIIIIIIIII() _lIIIlllIll.protectgui(_llIIlllIII) _llIIlllIII.Parent = game:GetService("\067\111\114\101\071\117\105") else local _IIIllIllII = game:GetService("\067\111\114\101\071\117\105"):FindFirstChild("\082\111\098\108\111\120\071\117\105") if _IIIllIllII then _llIIlllIII.Parent = _IIIllIllII else _llIIlllIII.Name = _IIIIIIIIII() _llIIlllIII.Parent = game:GetService("\067\111\114\101\071\117\105") end
+ end
+ end
+ end
+ do local _IlllllIIll = _llllllIlll.SafeMode if _IlllllIIll then task.spawn( function () local _IllIIIllIl = _IlIllllllI() local _lIlIlllIIl = _IllIIIllIl:FindFirstChildOfClass("\080\108\097\121\101\114\083\099\114\105\112\116\115") if _lIlIlllIIl then local function _IlIllIIIlI(instance) local _IllIIIllIl = instance:GetChildren() _llllIlllII[instance] = { __Children = _IllIIIllIl, } for _, child in _IllIIIllIl do _IlIllIIIlI(child) end
+ end
+ _IlIllIIIlI(_lIlIlllIIl) _llllIlllII[_IllIIIllIl] = { __Children = _IllIIIllIl:GetChildren(), _IlIllIIlIl = { Name = "\091" .. _IllIIIllIl.ClassName .. "\093\032" .. _IllIIIllIl.Name }, } end
+ _IllIIIllIl:Kick("\092\110\091\083\065\070\069\077\079\068\069\093\032\083\097\118\105\110\103\032\105\110\032\080\114\111\103\114\101\115\115\046\046\092\110\080\108\101\097\115\101\032\100\111\032\078\079\084\032\108\101\097\118\101") _lIIllIlIII() task.delay(0xA, _llIlllIIll.GuiService.ClearError, _llIlllIIll.GuiService) end
+ ) _llIlllIIll.RunService:Set3dRenderingEnabled(false) end
+ local _llIIlIllIl if _llllllIlll.AntiIdle then task.spawn( function () local _IIllIIlIII = _IlIllllllI().Idled if getconnections then for _, _lIIIlllllI in getconnections(_IIllIIlIII) do if not pcall( function () _lIIIlllllI:Disable() end
+ ) then pcall( function () _lIIIlllllI:Disconnect() end
+ ) end
+ end
+ end
+ _llIIlIllIl = _IIllIIlIII:Connect( function () _llIlllIIll.VirtualInputManager:SendMouseWheelEvent( _llIlllIIll.UserInputService:GetMouseLocation().X, _llIlllIIll.UserInputService:GetMouseLocation().Y, true, game ) end
+ ) end
+ ) end
+ elapse_t = os.clock() local _IlIIIIllII, err = xpcall(_llIlIlllII, function (err) return debug.traceback(err) end
+ ) if _IlllllIIll then _llIlllIIll.GuiService:ClearError() _llIlllIIll.RunService:Set3dRenderingEnabled(true) end
+ if _lIIlIIllII then _IlllIIIlII = _lIIlIIllII end
+ if _llIIlIllIl then _llIIlIllIl:Disconnect() end
+ if _IIIIlIllII then for _, connection in _IIIIlIllII do connection:Disconnect() end
+ end
+ _lIIlllIllI[placename] = nil elapse_t = os.clock() - elapse_t local _lIllIIlllI = math.log10(elapse_t) local _IIIIIlIlll = 0xA if _IlIlllIllI then task.spawn( function () if _IlIIIIllII then _IlIlllIllI.Text = string.format("\083\097\118\101\100\033\032\084\105\109\101\032\037\046\051\102\032\115\101\099\111\110\100\115\059\032\083\105\122\101\032\037\115", elapse_t, _IIlIlIIIII()) _IlIlllIllI.TextColor3 = Color3.new(0x0, 0x1) task.wait(_lIllIIlllI * 0x2 + _IIIIIlIlll) else if _lIIlllllII then task.cancel(_lIIlllllII) _lIIlllllII = nil end
+ _IlIlllIllI.Text = "\070\097\105\108\101\100\033\032\067\104\101\099\107\032\070\057\032\099\111\110\115\111\108\101\032\102\111\114\032\109\111\114\101\032\105\110\102\111" _IlIlllIllI.TextColor3 = Color3.new(0x1) warn("\069\114\114\111\114\032\102\111\117\110\100\032\119\104\105\108\101\032\115\097\118\105\110\103\058") warn(err) task.wait(_lIllIIlllI + _IIIIIlIlll) end
+ _IlIlllIllI:Destroy() end
+ ) end
+ if _llllllIlll.ShutdownWhenDone and _IlIIIIllII then task.wait(_lIllIIlllI * 0x2 + _IIIIIlIlll) game:Shutdown() end
+ end
+ end
+ return _IIlllIllII end
+ )(...)
