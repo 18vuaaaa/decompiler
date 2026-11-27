@@ -2833,7 +2833,12 @@ local function synsaveinstance(CustomOptions, CustomOptions2)
 						return konstantdecompiler.decompile(bytecode)
 					end)
 				else
-					ok, result = run_with_loading("Decompiling " .. script.Name, true, nil, decomp, script)
+                 if ScriptsDone then
+					ScriptsDone += 1
+				end
+				local progress = ScriptsDone and TotalScripts
+					and (" [" .. ScriptsDone .. "/" .. TotalScripts .. "]") or ""
+				ok, result = run_with_loading("Decompiling " .. script.Name .. progress, true, nil, decomp, script)
 				end
 				
 				if not result then
@@ -3613,6 +3618,18 @@ local function synsaveinstance(CustomOptions, CustomOptions2)
 
 			DELETEME.Parent = service.StarterGui
 			WatermarkGuiInstance = DELETEME
+		end
+
+        local TotalScripts, ScriptsDone
+		if not OPTIONS.noscripts and not DecompileJobless then
+			TotalScripts, ScriptsDone = 0, 0
+			for _, service_or_inst in ToSaveList do
+				for _, desc in service_or_inst:GetDescendants() do
+					if isLuaSourceContainer(desc) then
+						TotalScripts += 1
+					end
+				end
+			end
 		end
 
 		save_hierarchy(ToSaveList)
