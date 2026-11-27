@@ -3587,7 +3587,7 @@ local function synsaveinstance(CustomOptions, CustomOptions2)
          TextLabel_2.Position = UDim2.new(0.162435502, 0, 0.340259612, 0)
          TextLabel_2.Size = UDim2.new(0.694848061, 0, 0.298701286, 0)
          TextLabel_2.Font = Enum.Font.GothamBlack
-         TextLabel_2.Text = "This was leaked by ViciousVault / JOIN OUR DISCORD FOR MORE FILES"
+         TextLabel_2.Text = "This was decompiled by ViciousVault / JOIN OUR DISCORD FOR MORE FILES"
          TextLabel_2.TextColor3 = Color3.fromRGB(170, 0, 255)
          TextLabel_2.TextScaled = true
          TextLabel_2.TextSize = 14.000
