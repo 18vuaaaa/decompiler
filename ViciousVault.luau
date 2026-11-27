@@ -3507,7 +3507,9 @@ local function synsaveinstance(CustomOptions, CustomOptions2)
 			or IsolatePlayers
 			or NilInstances and global_container.getnilinstances -- ! Make sure this accurately reflects everything below
 
-        if OPTIONS.WatermarkGui then
+
+        local WatermarkGuiInstance
+		if OPTIONS.WatermarkGui then
          local DELETEME = Instance.new("ScreenGui")
          local Background = Instance.new("Frame")
          local BackgroundText = Instance.new("TextLabel")
@@ -3608,16 +3610,8 @@ local function synsaveinstance(CustomOptions, CustomOptions2)
          UIGradient_2.Color = ColorSequence.new{ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 255, 255)), ColorSequenceKeypoint.new(1.00, Color3.fromRGB(0, 0, 0))}
          UIGradient_2.Rotation = -90
          UIGradient_2.Parent = TextLabel_3
-	end
-        local WatermarkGuiInstance
-		if OPTIONS.WatermarkGui then
-			local DELETEME = Instance.new("ScreenGui")
-			-- ... (your full GUI construction code, unchanged) ...
-			UIGradient_2.Rotation = -90
-			UIGradient_2.Parent = TextLabel_3
-
-			DELETEME.Parent = service.StarterGui
-			WatermarkGuiInstance = DELETEME
+		 DELETEME.Parent = service.StarterGui
+		 WatermarkGuiInstance = DELETEME
 		end
 
         local TotalScripts, ScriptsDone
